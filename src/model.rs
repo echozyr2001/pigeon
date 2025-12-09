@@ -1,6 +1,6 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Endpoint {
@@ -120,6 +120,7 @@ pub struct Space {
     pub selected_header_ids: Vec<Uuid>,
     pub selected_body_id: Option<Uuid>,
     pub history: Vec<ResponseData>,
+    pub is_request_pending: bool,
 }
 
 impl Default for Space {
@@ -131,7 +132,7 @@ impl Default for Space {
             selected_header_ids: Vec::new(),
             selected_body_id: None,
             history: Vec::new(),
+            is_request_pending: false,
         }
     }
 }
-
