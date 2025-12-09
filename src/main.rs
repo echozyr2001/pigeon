@@ -292,6 +292,7 @@ impl LightweightPostman {
         true
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     fn create_space(&mut self, cx: &mut Context<Self>) {
         self.workspace.update(cx, |ws, _| {
             let mut space = Space::default();
@@ -598,7 +599,7 @@ impl LightweightPostman {
                     .gap_4()
                     .p_4()
                     .bg(palette.muted_bg)
-                    .child(self.render_workspace_catalog(&workspace, palette, cx))
+                    .child(self.render_workspace_catalog(workspace, palette, cx))
                     .child(
                         div()
                             .flex_1()
