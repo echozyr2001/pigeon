@@ -95,9 +95,13 @@ struct ThemePalette {
     app_bg: Rgba,
     text_primary: Rgba,
     text_secondary: Rgba,
+    #[allow(dead_code)]
     sidebar_bg: Rgba,
+    #[allow(dead_code)]
     sidebar_border: Rgba,
+    #[allow(dead_code)]
     sidebar_item_active: Rgba,
+    #[allow(dead_code)]
     sidebar_item_hover: Rgba,
     catalog_card_bg: Rgba,
     card_bg: Rgba,
@@ -117,7 +121,9 @@ struct JsonHighlightPalette {
     string: Rgba,
     number: Rgba,
     literal: Rgba,
+    #[allow(dead_code)]
     punctuation: Rgba,
+    #[allow(dead_code)]
     plain: Rgba,
 }
 
@@ -1672,7 +1678,7 @@ impl LightweightPostman {
         } else if trimmed
             .chars()
             .next()
-            .map_or(false, |c| c.is_ascii_digit() || c == '-')
+            .is_some_and(|c| c.is_ascii_digit() || c == '-')
         {
             highlight.number // Numbers
         } else if trimmed.starts_with("true")
@@ -1841,7 +1847,7 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|cx| LightweightPostman::new(cx));
+                let view = cx.new(LightweightPostman::new);
                 // This first level on the window, should be a Root.
                 cx.new(|cx| Root::new(view, window, cx))
             })?;
