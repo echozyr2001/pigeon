@@ -1,5 +1,14 @@
 use gpui::prelude::*;
-use gpui::{AnyElement, Rgba, *};
+use gpui::*;
+use gpui::{AnyElement, Rgba};
+use gpui_component::scroll::ScrollableElement;
+use gpui_component::*;
+use gpui_component::{
+    button::{Button, ButtonVariants},
+    sidebar::{Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
+    tab::{Tab, TabBar},
+    IconName, Side,
+};
 use std::sync::OnceLock;
 use uuid::Uuid;
 
@@ -7,7 +16,7 @@ mod components;
 mod model;
 use components::history_entry_card::HistoryEntryCardStyle;
 use components::text_input::{
-    create_form_text_input, register_form_input_keybindings, FormTextInput,
+    create_form_text_input, create_multiline_form_text_input, FormTextInput,
 };
 use components::HistoryEntryCard;
 use model::{Body, Endpoint, Header, ResponseData, Space, Workspace};
@@ -102,11 +111,39 @@ struct ThemePalette {
     error_badge: Rgba,
 }
 
+#[derive(Clone, Copy)]
+struct JsonHighlightPalette {
+    key: Rgba,
+    string: Rgba,
+    number: Rgba,
+    literal: Rgba,
+    punctuation: Rgba,
+    plain: Rgba,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LibraryTab {
     Endpoints,
     Headers,
     Bodies,
+}
+
+impl LibraryTab {
+    fn as_index(self) -> usize {
+        match self {
+            LibraryTab::Endpoints => 0,
+            LibraryTab::Headers => 1,
+            LibraryTab::Bodies => 2,
+        }
+    }
+
+    fn from_index(index: usize) -> Self {
+        match index {
+            0 => LibraryTab::Endpoints,
+            1 => LibraryTab::Headers,
+            _ => LibraryTab::Bodies,
+        }
+    }
 }
 
 struct LightweightPostman {
@@ -123,7 +160,6 @@ struct LightweightPostman {
 impl LightweightPostman {
     fn new(cx: &mut Context<Self>) -> Self {
         let workspace = cx.new(|_| Workspace::default());
-        register_form_input_keybindings(cx);
         let endpoint_form = EndpointForm::new(cx);
         let header_form = HeaderForm::new(cx);
         let body_form = BodyForm::new(cx);
@@ -184,14 +220,6 @@ impl LightweightPostman {
         self.endpoint_form.error = None;
         self.header_form.error = None;
         self.body_form.error = None;
-    }
-
-    fn submit_form_click(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.submit_active_form(cx);
-    }
-
-    fn cancel_form_click(&mut self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.close_creation_form(cx);
     }
 
     fn submit_active_form(&mut self, cx: &mut Context<Self>) {
@@ -497,91 +525,119 @@ impl LightweightPostman {
     fn render_sidebar(&self, cx: &Context<Self>) -> impl IntoElement {
         let workspace = self.workspace.read(cx);
         let palette = self.palette();
+        let total_history: usize = workspace
+            .spaces
+            .iter()
+            .map(|space| space.history.len())
+            .sum();
+        let theme_label = match self.theme_mode {
+            ThemeMode::Light => "Dark Mode",
+            ThemeMode::Dark => "Light Mode",
+        };
 
-        div()
-            .w_64()
-            .h_full()
-            .border_r_1()
-            .border_color(palette.sidebar_border)
-            .bg(palette.sidebar_bg)
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .p_4()
-                    .border_b_1()
-                    .border_color(palette.sidebar_border)
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(div().font_weight(FontWeight::BOLD).child("Workspace"))
-                    .child(
+        let space_menu = if workspace.spaces.is_empty() {
+            SidebarMenu::new().child(
+                SidebarMenuItem::new("暂无空间")
+                    .icon(IconName::Inbox)
+                    .active(false)
+                    .suffix(
                         div()
-                            .px_3()
-                            .py_1()
-                            .rounded_md()
-                            .bg(palette.accent)
-                            .text_color(rgb(0xffffff))
-                            .cursor_pointer()
                             .text_xs()
-                            .child(match self.theme_mode {
-                                ThemeMode::Light => "Dark",
-                                ThemeMode::Dark => "Light",
-                            })
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.toggle_theme(cx);
-                                }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .px_3()
-                            .py_1()
-                            .rounded_md()
-                            .bg(palette.accent)
-                            .text_color(rgb(0xffffff))
-                            .cursor_pointer()
-                            .text_xs()
-                            .child("Add Space")
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.create_space(cx);
-                                }),
-                            ),
+                            .text_color(palette.text_secondary)
+                            .child("点击下方新建"),
                     ),
             )
-            .child(
-                div()
-                    .p_2()
-                    .child(div().font_weight(FontWeight::BOLD).mb_2().child("Spaces"))
-                    .children(workspace.spaces.iter().enumerate().map(|(i, space)| {
-                        let is_active = self.active_space_id == Some(space.id);
-                        let id = space.id;
+        } else {
+            SidebarMenu::new().children(workspace.spaces.iter().map(|space| {
+                let is_active = self.active_space_id == Some(space.id);
+                let space_id = space.id;
+                SidebarMenuItem::new(space.name.clone())
+                    .icon(if is_active {
+                        IconName::CircleCheck
+                    } else {
+                        IconName::Globe
+                    })
+                    .active(is_active)
+                    .suffix(
                         div()
-                            .id(i)
-                            .p_2()
-                            .rounded_md()
-                            .bg(if is_active {
-                                palette.sidebar_item_active
-                            } else {
-                                palette.sidebar_bg
-                            })
-                            .text_color(palette.text_primary)
-                            .hover(|s| s.bg(palette.sidebar_item_hover))
-                            .border_1()
-                            .border_color(palette.sidebar_border)
-                            .cursor_pointer()
-                            .child(space.name.clone())
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.select_space(id, cx);
-                                }),
-                            )
-                    })),
+                            .text_xs()
+                            .text_color(palette.text_secondary)
+                            .child(format!("{} 条", space.history.len())),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.select_space(space_id, cx);
+                    }))
+            }))
+        };
+
+        Sidebar::new(Side::Left)
+            .collapsible(false)
+            .header(
+                SidebarHeader::new().child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(div().font_weight(FontWeight::BOLD).child("Workspace"))
+                                .child(
+                                    Button::new("toggle-theme")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(if matches!(self.theme_mode, ThemeMode::Light) {
+                                            IconName::Moon
+                                        } else {
+                                            IconName::Sun
+                                        })
+                                        .label(theme_label)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.toggle_theme(cx);
+                                        })),
+                                ),
+                        )
+                        .child(
+                            Button::new("add-space")
+                                .primary()
+                                .small()
+                                .icon(IconName::Plus)
+                                .label("Add Space")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.create_space(cx);
+                                })),
+                        ),
+                ),
+            )
+            .child(
+                SidebarGroup::new("Spaces").child(space_menu).child(
+                    SidebarMenu::new().child(
+                        SidebarMenuItem::new("全部响应")
+                            .icon(IconName::Info)
+                            .active(false)
+                            .suffix(
+                                div()
+                                    .text_xs()
+                                    .text_color(palette.text_secondary)
+                                    .child(format!("{} 条", total_history)),
+                            ),
+                    ),
+                ),
+            )
+            .footer(
+                SidebarFooter::new().child(
+                    div().w_full().child(
+                        Button::new("new-space-footer")
+                            .outline()
+                            .icon(IconName::Star)
+                            .label("快速新建 Space")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.create_space(cx);
+                            })),
+                    ),
+                ),
             )
     }
 
@@ -593,41 +649,55 @@ impl LightweightPostman {
             if let Some(space) = workspace.spaces.iter().find(|s| s.id == space_id) {
                 return div()
                     .flex_1()
-                    .flex()
-                    .flex_wrap()
-                    .items_start()
-                    .gap_4()
-                    .p_4()
+                    .size_full()
+                    .overflow_y_scrollbar()
                     .bg(palette.muted_bg)
-                    .child(self.render_workspace_catalog(workspace, palette, cx))
                     .child(
                         div()
-                            .flex_1()
-                            .min_w(px(360.))
+                            .p_4()
                             .flex()
-                            .flex_col()
+                            .flex_wrap()
+                            .items_start()
                             .gap_4()
-                            .child(self.render_space_header(space, cx, palette))
                             .child(
                                 div()
+                                    .flex_shrink_0()
+                                    .child(self.render_workspace_catalog(workspace, palette, cx)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(320.))
                                     .flex()
-                                    .flex_wrap()
-                                    .items_start()
+                                    .flex_col()
                                     .gap_4()
+                                    .child(self.render_space_header(space, cx, palette))
                                     .child(
                                         div()
-                                            .flex_1()
                                             .flex()
-                                            .flex_col()
+                                            .flex_wrap()
+                                            .items_start()
                                             .gap_4()
                                             .child(
-                                                self.render_space_form(
-                                                    space, workspace, cx, palette,
-                                                ),
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0() // Allow content to shrink
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap_4()
+                                                    .child(self.render_space_form(
+                                                        space, workspace, cx, palette,
+                                                    ))
+                                                    .child(
+                                                        self.render_response_area(space, palette),
+                                                    ),
                                             )
-                                            .child(self.render_response_area(space, palette)),
-                                    )
-                                    .child(self.render_history(space, palette)),
+                                            .child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .child(self.render_history(space, palette)),
+                                            ),
+                                    ),
                             ),
                     );
             }
@@ -635,6 +705,9 @@ impl LightweightPostman {
 
         div()
             .flex_1()
+            .size_full()
+            .overflow_y_scrollbar()
+            .bg(palette.muted_bg)
             .flex()
             .items_center()
             .justify_center()
@@ -647,14 +720,34 @@ impl LightweightPostman {
         palette: ThemePalette,
         cx: &Context<Self>,
     ) -> impl IntoElement {
-        let definition_count = format!(
-            "{} definitions",
-            workspace.endpoints.len() + workspace.headers.len() + workspace.bodies.len()
-        );
+        let definition_count =
+            workspace.endpoints.len() + workspace.headers.len() + workspace.bodies.len();
+        let active_tab_index = self.active_library_tab.as_index();
+
+        let mut tab_bar = TabBar::new("workspace-library-tabs")
+            .pill()
+            .selected_index(active_tab_index)
+            .on_click(cx.listener(|this, index, _, cx| {
+                this.select_library_tab(LibraryTab::from_index(*index), cx);
+            }));
+
+        for label in ["Endpoints", "Headers", "Bodies"] {
+            tab_bar = tab_bar.child(Tab::new().label(label));
+        }
+
+        let create_label = if self.creation_form_open {
+            "隐藏表单"
+        } else {
+            "新建"
+        };
+        let create_icon = if self.creation_form_open {
+            IconName::EyeOff
+        } else {
+            IconName::Plus
+        };
 
         let mut catalog = div()
-            .w_80()
-            .min_w_72()
+            .w(px(320.))
             .flex_shrink_0()
             .rounded_lg()
             .border_1()
@@ -671,90 +764,33 @@ impl LightweightPostman {
                     .justify_between()
                     .child(
                         div()
-                            .text_sm()
-                            .text_color(palette.text_secondary)
-                            .child("Workspace Library"),
-                    )
-                    .child(
-                        div()
-                            .px_2()
-                            .py_1()
-                            .rounded_full()
-                            .bg(palette.muted_bg)
-                            .text_sm()
-                            .child(definition_count),
-                    ),
-            )
-            .child({
-                let tab_buttons: Vec<AnyElement> = ["Endpoints", "Headers", "Bodies"]
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, label)| {
-                        let tab = match idx {
-                            0 => LibraryTab::Endpoints,
-                            1 => LibraryTab::Headers,
-                            _ => LibraryTab::Bodies,
-                        };
-                        let active = self.active_library_tab == tab;
-                        div()
-                            .px_3()
-                            .py_1()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(if active {
-                                palette.accent
-                            } else {
-                                palette.card_border
-                            })
-                            .bg(if active {
-                                palette.accent_subtle
-                            } else {
-                                palette.card_bg
-                            })
-                            .text_color(if active {
-                                palette.accent
-                            } else {
-                                palette.text_secondary
-                            })
-                            .cursor_pointer()
-                            .child(label)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.select_library_tab(tab, cx);
-                                }),
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(palette.text_secondary)
+                                    .child("Workspace Library"),
                             )
-                            .into_any_element()
-                    })
-                    .collect();
-
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().flex().items_center().gap_2().children(tab_buttons))
-                    .child(div().flex_1())
-                    .child(
-                        div()
-                            .px_3()
-                            .py_1()
-                            .rounded_md()
-                            .bg(palette.accent)
-                            .text_color(rgb(0xffffff))
-                            .cursor_pointer()
-                            .child(if self.creation_form_open {
-                                "Hide Form"
-                            } else {
-                                "Create"
-                            })
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.toggle_creation_form(cx);
-                                }),
+                            .child(
+                                div()
+                                    .text_lg()
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(format!("{} definitions", definition_count)),
                             ),
                     )
-            })
+                    .child(
+                        Button::new("toggle-library-form")
+                            .small()
+                            .icon(create_icon)
+                            .label(create_label)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_creation_form(cx);
+                            })),
+                    ),
+            )
+            .child(tab_bar)
             .child(match self.active_library_tab {
                 LibraryTab::Endpoints => self.render_endpoint_library(workspace, palette, cx),
                 LibraryTab::Headers => self.render_header_library(workspace, palette, cx),
@@ -817,13 +853,15 @@ impl LightweightPostman {
                             .flex()
                             .justify_end()
                             .gap_2()
-                            .child(self.secondary_button("取消", palette).on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(Self::cancel_form_click),
+                            .child(Button::new("cancel-create").ghost().label("取消").on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.close_creation_form(cx);
+                                }),
                             ))
-                            .child(self.primary_button("保存", palette).on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(Self::submit_form_click),
+                            .child(Button::new("save-create").primary().label("保存").on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.submit_active_form(cx);
+                                }),
                             )),
                     ),
             )
@@ -903,31 +941,6 @@ impl LightweightPostman {
             .child(input)
     }
 
-    fn primary_button(&self, label: &str, palette: ThemePalette) -> Div {
-        div()
-            .px_4()
-            .py_2()
-            .rounded_md()
-            .bg(palette.accent)
-            .text_color(rgb(0xffffff))
-            .text_sm()
-            .cursor_pointer()
-            .child(label.to_string())
-    }
-
-    fn secondary_button(&self, label: &str, palette: ThemePalette) -> Div {
-        div()
-            .px_4()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(palette.card_border)
-            .text_color(palette.text_secondary)
-            .text_sm()
-            .cursor_pointer()
-            .child(label.to_string())
-    }
-
     fn render_endpoint_library(
         &self,
         workspace: &Workspace,
@@ -1000,6 +1013,8 @@ impl LightweightPostman {
                                 div()
                                     .text_xs()
                                     .text_color(palette.text_secondary)
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
                                     .child(endpoint.url.clone()),
                             ),
                     )
@@ -1158,6 +1173,11 @@ impl LightweightPostman {
         palette: ThemePalette,
     ) -> impl IntoElement {
         let is_pending = space.is_request_pending;
+        let send_label = if is_pending {
+            "发送中..."
+        } else {
+            "Send Request"
+        };
         div()
             .p_4()
             .rounded_lg()
@@ -1194,29 +1214,15 @@ impl LightweightPostman {
                             .child(format!("{} responses stored", space.history.len())),
                     )
                     .child(
-                        div()
-                            .px_4()
-                            .py_2()
-                            .rounded_md()
-                            .bg(if is_pending {
-                                palette.accent_subtle
-                            } else {
-                                palette.accent
-                            })
-                            .text_color(rgb(0xffffff))
-                            .opacity(if is_pending { 0.7 } else { 1.0 })
-                            .cursor_pointer()
-                            .child(if is_pending {
-                                "Sending..."
-                            } else {
-                                "Send Request"
-                            })
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.send_request(cx);
-                                }),
-                            ),
+                        Button::new("send-request")
+                            .primary()
+                            .icon(IconName::ArrowRight)
+                            .label(send_label)
+                            .loading(is_pending)
+                            .disabled(is_pending)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.send_request(cx);
+                            })),
                     ),
             )
     }
@@ -1287,15 +1293,19 @@ impl LightweightPostman {
                                         .flex()
                                         .flex_col()
                                         .gap_1()
+                                        .min_w_0() // Allow shrinking below content size
                                         .child(
                                             div()
                                                 .font_weight(FontWeight::MEDIUM)
+                                                .overflow_hidden()
                                                 .child(ep.name.clone()),
                                         )
                                         .child(
                                             div()
                                                 .text_xs()
                                                 .text_color(palette.text_secondary)
+                                                .overflow_hidden()
+                                                .whitespace_nowrap()
                                                 .child(ep.url.clone()),
                                         ),
                                 )
@@ -1400,12 +1410,46 @@ impl LightweightPostman {
 
     fn render_response_area(&self, space: &Space, palette: ThemePalette) -> impl IntoElement {
         if let Some(last_response) = space.history.first() {
+            let highlighted_body = self.render_response_body(&last_response.body, palette);
+            let headers_list: AnyElement = if last_response.headers.is_empty() {
+                div()
+                    .text_sm()
+                    .text_color(palette.text_secondary)
+                    .child("暂无响应 Header")
+                    .into_any_element()
+            } else {
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .max_h(px(200.0))
+                    .overflow_y_scrollbar()
+                    .children(last_response.headers.iter().map(|(key, value)| {
+                        div()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(palette.card_border)
+                            .bg(palette.history_bg)
+                            .child(
+                                div()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .child(format!("{}: {}", key, value)),
+                            )
+                    }))
+                    .into_any_element()
+            };
+
             div()
                 .p_4()
                 .rounded_lg()
                 .border_1()
                 .border_color(palette.card_border)
                 .bg(palette.card_bg)
+                .max_w_full()
+                .w_full()
                 .child(
                     div()
                         .flex()
@@ -1489,12 +1533,52 @@ impl LightweightPostman {
                 .child(
                     div()
                         .mt_3()
-                        .p_3()
-                        .rounded_md()
-                        .bg(palette.muted_bg)
-                        .text_sm()
-                        .font_family("Courier New")
-                        .child(last_response.body.clone()),
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(palette.text_secondary)
+                                .child("Response Headers"),
+                        )
+                        .child(headers_list),
+                )
+                .child(
+                    div()
+                        .mt_3()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child("Response Body"),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(palette.text_secondary)
+                                        .child(format!("{} chars", last_response.body.len())),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .border_1()
+                                .border_color(palette.card_border)
+                                .bg(palette.muted_bg)
+                                .rounded_md()
+                                .max_h(px(400.0)) // Reduced from 500px to 400px
+                                .max_w_full()
+                                .overflow_y_scrollbar()
+                                .child(div().p_3().overflow_x_scrollbar().child(highlighted_body)),
+                        ),
                 )
         } else {
             div()
@@ -1504,6 +1588,186 @@ impl LightweightPostman {
                 .border_color(palette.card_border)
                 .bg(palette.card_bg)
                 .child("No response yet")
+        }
+    }
+
+    fn render_response_body(&self, body: &str, palette: ThemePalette) -> AnyElement {
+        // Performance thresholds - aggressive for smooth scrolling
+        const MAX_CHARS_FOR_HIGHLIGHT: usize = 15000; // 15KB for syntax highlighting
+        const MAX_LINES_WITH_HIGHLIGHT: usize = 200; // 200 lines max with highlighting
+        const MAX_LINES_PLAIN: usize = 300; // 300 lines for plain text
+
+        // For very large content, use plain text only
+        if body.len() > MAX_CHARS_FOR_HIGHLIGHT {
+            return Self::render_plain_body_fast(body, palette, MAX_LINES_PLAIN);
+        }
+
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
+            if let Ok(pretty) = serde_json::to_string_pretty(&value) {
+                // Check again after pretty printing
+                if pretty.len() > MAX_CHARS_FOR_HIGHLIGHT {
+                    return Self::render_plain_body_fast(&pretty, palette, MAX_LINES_PLAIN);
+                }
+
+                let all_lines: Vec<&str> = pretty.lines().collect();
+                let total_lines = all_lines.len();
+                let lines_to_show = all_lines
+                    .iter()
+                    .take(MAX_LINES_WITH_HIGHLIGHT.min(total_lines));
+
+                // Render with simple per-line coloring for performance
+                let highlight_palette = self.json_highlight_palette(palette);
+                let line_elements: Vec<AnyElement> = lines_to_show
+                    .enumerate()
+                    .map(|(idx, line)| {
+                        Self::render_simple_json_line(idx, line, highlight_palette, palette)
+                    })
+                    .collect();
+
+                let mut container = div()
+                    .font_family("JetBrains Mono")
+                    .text_sm()
+                    .flex()
+                    .flex_col()
+                    .children(line_elements);
+
+                // Show truncation message if content is too long
+                if total_lines > MAX_LINES_WITH_HIGHLIGHT {
+                    container = container.child(
+                        div()
+                            .text_color(palette.text_secondary)
+                            .mt_3()
+                            .p_2()
+                            .bg(palette.accent_subtle)
+                            .rounded_md()
+                            .child(format!(
+                                "⚠️ Content truncated: Showing {} of {} lines",
+                                MAX_LINES_WITH_HIGHLIGHT, total_lines
+                            )),
+                    );
+                }
+
+                return container.into_any_element();
+            }
+        }
+
+        Self::render_plain_body_fast(body, palette, MAX_LINES_PLAIN)
+    }
+
+    // Simple per-line rendering without token-level highlighting
+    fn render_simple_json_line(
+        _idx: usize,
+        line: &str,
+        highlight: JsonHighlightPalette,
+        palette: ThemePalette,
+    ) -> AnyElement {
+        let trimmed = line.trim_start();
+        let indent_count = line.len() - trimmed.len();
+
+        // Simple color coding based on line content
+        let color = if trimmed.starts_with('"') && trimmed.contains(':') {
+            highlight.key // JSON keys
+        } else if trimmed.starts_with('"') {
+            highlight.string // String values
+        } else if trimmed
+            .chars()
+            .next()
+            .map_or(false, |c| c.is_ascii_digit() || c == '-')
+        {
+            highlight.number // Numbers
+        } else if trimmed.starts_with("true")
+            || trimmed.starts_with("false")
+            || trimmed.starts_with("null")
+        {
+            highlight.literal // Literals
+        } else {
+            palette.text_primary // Default
+        };
+
+        div()
+            .pl(px(indent_count as f32 * 8.0))
+            .text_color(color)
+            .child(trimmed.to_string())
+            .into_any_element()
+    }
+
+    fn render_plain_body_fast(body: &str, palette: ThemePalette, max_lines: usize) -> AnyElement {
+        let all_lines: Vec<&str> = body.lines().collect();
+        let total_lines = all_lines.len();
+        let char_count = body.len();
+
+        let lines_to_show = if total_lines > max_lines {
+            all_lines
+                .iter()
+                .take(max_lines)
+                .copied()
+                .collect::<Vec<_>>()
+        } else {
+            all_lines
+        };
+
+        let mut container = div()
+            .font_family("JetBrains Mono")
+            .text_sm()
+            .text_color(palette.text_primary)
+            .flex()
+            .flex_col();
+
+        // Render each line as a separate div for proper line breaks
+        for line in lines_to_show {
+            container = container.child(div().child(line.to_string()));
+        }
+
+        // Show truncation/performance messages
+        if total_lines > max_lines {
+            container = container.child(
+                div()
+                    .mt_3()
+                    .p_2()
+                    .bg(palette.accent_subtle)
+                    .rounded_md()
+                    .text_color(palette.text_secondary)
+                    .child(format!(
+                        "⚠️ Content truncated for performance\n📊 Showing {} of {} lines ({} total chars)\n💡 Large responses are displayed as plain text",
+                        max_lines, total_lines, char_count
+                    ))
+            );
+        } else if char_count > 15000 {
+            container = container.child(
+                div()
+                    .mt_3()
+                    .p_2()
+                    .bg(palette.accent_subtle)
+                    .rounded_md()
+                    .text_color(palette.text_secondary)
+                    .child(format!(
+                        "💡 Large response ({} chars) displayed as plain text for better performance",
+                        char_count
+                    ))
+            );
+        }
+
+        container.into_any_element()
+    }
+
+    fn json_highlight_palette(&self, palette: ThemePalette) -> JsonHighlightPalette {
+        match self.theme_mode {
+            ThemeMode::Light => JsonHighlightPalette {
+                key: palette.accent,
+                string: rgb(0x1c7c54),
+                number: rgb(0xc18401),
+                literal: rgb(0x7d3cb5),
+                punctuation: palette.text_secondary,
+                plain: palette.text_primary,
+            },
+            ThemeMode::Dark => JsonHighlightPalette {
+                key: palette.accent,
+                string: rgb(0x98c379),
+                number: rgb(0xd19a66),
+                literal: rgb(0xc678dd),
+                punctuation: palette.text_secondary,
+                plain: palette.text_primary,
+            },
         }
     }
 
@@ -1569,11 +1833,22 @@ impl Render for LightweightPostman {
 }
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
-        cx.open_window(WindowOptions::default(), |_, cx| {
-            cx.new(LightweightPostman::new)
+    let app = Application::new().with_assets(gpui_component_assets::Assets);
+
+    app.run(move |cx| {
+        // This must be called before using any GPUI Component features.
+        gpui_component::init(cx);
+
+        cx.spawn(async move |cx| {
+            cx.open_window(WindowOptions::default(), |window, cx| {
+                let view = cx.new(|cx| LightweightPostman::new(cx));
+                // This first level on the window, should be a Root.
+                cx.new(|cx| Root::new(view, window, cx))
+            })?;
+
+            Ok::<_, anyhow::Error>(())
         })
-        .unwrap();
+        .detach();
     });
 }
 
@@ -1640,7 +1915,7 @@ impl BodyForm {
         Self {
             name: create_form_text_input(cx, "名称", ""),
             content_type: create_form_text_input(cx, "Content-Type", "application/json"),
-            content: create_form_text_input(cx, "内容", "{}"),
+            content: create_multiline_form_text_input(cx, "内容", "{}"),
             error: None,
         }
     }
