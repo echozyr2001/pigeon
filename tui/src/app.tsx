@@ -37,9 +37,11 @@ function KeyboardShortcuts(props: {
   onTab: () => void;
   onFocusMethod?: () => void;
   onFocusUrl?: () => void;
+  canQuit?: () => boolean;
 }) {
   useInput((input, key) => {
-    if (input === "q") {
+    // Avoid quitting while the user is typing (e.g. URL contains 'q').
+    if (input === "q" && (props.canQuit?.() ?? true)) {
       props.onExit();
       return;
     }
@@ -131,6 +133,18 @@ export function App() {
   const [requestTab, setRequestTab] = useState<RequestTab>("headers");
   const [responseTab, setResponseTab] = useState<ResponseTab>("body");
   const [requestField, setRequestField] = useState<RequestField>("headerKey");
+
+  const canQuit = () => {
+    // If you're currently editing/typing in a field, `q` should be treated as input.
+    if (focus === "topbar") return false;
+    if (
+      focus === "requestPane" &&
+      (requestTab === "headers" || requestTab === "body")
+    ) {
+      return false;
+    }
+    return true;
+  };
 
   const [method, setMethod] = useState<HttpMethod>("GET");
   const [url, setUrl] = useState<string>("https://httpbin.org/get");
@@ -515,6 +529,7 @@ export function App() {
           setFocus("topbar");
           setTopbarField("url");
         }}
+        canQuit={canQuit}
       />
 
       <Box justifyContent="space-between" marginBottom={1}>
