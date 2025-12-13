@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { Box, Text, useInput } from "ink";
+import { theme } from "@/ui/theme";
 
 export type TabDef<T extends string> = { id: T; label: string };
 
@@ -40,9 +41,11 @@ export function TabBar<T extends string>(props: {
           <Box key={t.id} flexDirection="column">
             <Text color={isActiveTab ? "white" : "gray"} bold={isActiveTab}>
               {t.label}
-              {t.label === "Headers" ? <Text color="cyan">•</Text> : null}
+              {t.label === "Headers" ? (
+                <Text color={theme.tabDot}>•</Text>
+              ) : null}
             </Text>
-            <Text color={isActiveTab ? "magenta" : "black"}>
+            <Text color={isActiveTab ? theme.tabActiveUnderline : "black"}>
               {isActiveTab ? "─".repeat(Math.max(1, t.label.length)) : " "}
             </Text>
           </Box>

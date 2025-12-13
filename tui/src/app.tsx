@@ -13,6 +13,7 @@ import { HSplit, VSplit } from "@/ui/SplitPane";
 import { TabBar } from "@/ui/TabBar";
 import { KeyHints } from "@/ui/KeyHints";
 import { TextArea } from "@/ui/TextArea";
+import { theme } from "@/ui/theme";
 
 type FocusTarget = "topbar" | "requestTabs" | "requestPane" | "responseTabs";
 type TopbarField = "method" | "url";
@@ -35,6 +36,7 @@ function KeyboardShortcuts(props: {
   onExit: () => void;
   onSend: () => void;
   onTab: () => void;
+  onTabPrev?: () => void;
   onFocusMethod?: () => void;
   onFocusUrl?: () => void;
   canQuit?: () => boolean;
@@ -72,8 +74,14 @@ function KeyboardShortcuts(props: {
       return;
     }
 
+    if (key.tab && key.shift) {
+      props.onTabPrev?.();
+      return;
+    }
+
     if (key.tab) {
       props.onTab();
+      return;
     }
 
     // Posting-like quick focus
@@ -232,6 +240,29 @@ export function App() {
     if (next === "topbar") setTopbarField("url");
   };
 
+  const tabPrev = () => {
+    // Special-case: topbar contains 2 focusable controls.
+    if (focus === "topbar") {
+      if (topbarField === "url") {
+        setTopbarField("method");
+      } else {
+        setFocus("responseTabs");
+      }
+      return;
+    }
+
+    const order: FocusTarget[] = [
+      "topbar",
+      "requestTabs",
+      "requestPane",
+      "responseTabs",
+    ];
+    const idx = Math.max(0, order.indexOf(focus));
+    const next = order[(idx - 1 + order.length) % order.length] ?? "topbar";
+    setFocus(next);
+    if (next === "topbar") setTopbarField("url");
+  };
+
   // In non-interactive environments (like CI), Ink can't enable raw mode.
   // Also, @inkjs/ui inputs require raw mode to work.
   if (!isRawModeSupported) {
@@ -263,11 +294,16 @@ export function App() {
     { id: "trace", label: "Trace" },
   ] as const;
 
+  const topbarFocused = focus === "topbar";
+  const requestFocused = focus === "requestTabs" || focus === "requestPane";
+  const responseFocused = focus === "responseTabs";
+
   const TopBar = (
     <Box
       flexDirection="row"
       gap={1}
       borderStyle="round"
+      borderColor={topbarFocused ? theme.focusBorder : theme.borderIdle}
       paddingX={1}
       paddingY={0}
     >
@@ -311,7 +347,13 @@ export function App() {
   );
 
   const Sidebar = (
-    <Box flexDirection="column" borderStyle="round" paddingX={1} paddingY={0}>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={theme.borderIdle}
+      paddingX={1}
+      paddingY={0}
+    >
       <Box justifyContent="space-between">
         <Text bold>Collection</Text>
         <Text dimColor>(placeholder)</Text>
@@ -327,6 +369,7 @@ export function App() {
     <Box
       flexDirection="column"
       borderStyle="round"
+      borderColor={requestFocused ? theme.focusBorder : theme.borderIdle}
       paddingX={1}
       paddingY={0}
       flexGrow={1}
@@ -445,6 +488,7 @@ export function App() {
     <Box
       flexDirection="column"
       borderStyle="round"
+      borderColor={responseFocused ? theme.focusBorder : theme.borderIdle}
       paddingX={1}
       paddingY={0}
       flexGrow={1}
@@ -521,6 +565,7 @@ export function App() {
           void send();
         }}
         onTab={tabNext}
+        onTabPrev={tabPrev}
         onFocusMethod={() => {
           setFocus("topbar");
           setTopbarField("method");
@@ -551,6 +596,7 @@ export function App() {
               { key: "^t", label: "Method" },
               { key: "^l", label: "URL" },
               { key: "tab", label: "Focus next" },
+              { key: "shift+tab", label: "Focus prev" },
               { key: "←/→", label: "Switch tab" },
               { key: "q", label: "Quit" },
             ]}
