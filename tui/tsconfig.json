@@ -29,6 +29,7 @@
     "noPropertyAccessFromIndexSignature": false,
     
     // Path aliases
+    "baseUrl": ".",
     "paths": {
       "@/*": [
         "./src/*"

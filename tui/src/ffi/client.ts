@@ -12,6 +12,18 @@ const inflight = new Map<
   { resolve: (r: FfiResponse) => void; reject: (e: Error) => void }
 >();
 
+export function terminateRustWorker(reason = "terminated"): void {
+  if (!worker) return;
+  // Reject all inflight requests so callers don't hang.
+  for (const [id, pending] of inflight) {
+    pending.reject(new Error(`Worker ${reason} (request ${id})`));
+  }
+  inflight.clear();
+
+  worker.terminate();
+  worker = null;
+}
+
 function getWorker(): Worker {
   if (worker) return worker;
 

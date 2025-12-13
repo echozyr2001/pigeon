@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text, useApp, useInput, useStdin } from "ink";
 import { Select, Spinner, StatusMessage, TextInput } from "@inkjs/ui";
 import type {
@@ -8,15 +8,18 @@ import type {
   RequestHeader,
 } from "@/types";
 import { sendRequestViaRust } from "@/ffi/client";
+import { terminateRustWorker } from "@/ffi/client";
+import { HSplit, VSplit } from "@/ui/SplitPane";
+import { TabBar } from "@/ui/TabBar";
+import { KeyHints } from "@/ui/KeyHints";
+import { TextArea } from "@/ui/TextArea";
 
-type ActiveField =
-  | "method"
-  | "url"
-  | "headerKey"
-  | "headerValue"
-  | "contentType"
-  | "body"
-  | "none";
+type FocusTarget = "topbar" | "requestTabs" | "requestPane" | "responseTabs";
+type TopbarField = "method" | "url";
+type RequestField = "headerKey" | "headerValue" | "contentType" | "body";
+
+type RequestTab = "headers" | "body" | "query" | "auth" | "info" | "options";
+type ResponseTab = "body" | "headers" | "trace";
 
 const methodOptions: Array<{ label: string; value: HttpMethod }> = [
   { label: "GET", value: "GET" },
@@ -32,6 +35,8 @@ function KeyboardShortcuts(props: {
   onExit: () => void;
   onSend: () => void;
   onTab: () => void;
+  onFocusMethod?: () => void;
+  onFocusUrl?: () => void;
 }) {
   useInput((input, key) => {
     if (input === "q") {
@@ -46,7 +51,9 @@ function KeyboardShortcuts(props: {
 
     // Many terminals encode Ctrl+J as LF (\n) instead of reporting ctrl+j.
     // We treat LF as the "send-request" binding (Posting default).
-    if (input === "\n") {
+    // Important: Enter usually comes as `\r` (and key.return === true).
+    // Ctrl+J usually comes as `\n` (and key.return === false).
+    if (input === "\n" && !key.return) {
       props.onSend();
       return;
     }
@@ -65,6 +72,15 @@ function KeyboardShortcuts(props: {
 
     if (key.tab) {
       props.onTab();
+    }
+
+    // Posting-like quick focus
+    if (key.ctrl && input === "t") {
+      props.onFocusMethod?.();
+    }
+
+    if (key.ctrl && input === "l") {
+      props.onFocusUrl?.();
     }
   });
 
@@ -89,11 +105,32 @@ function normalizeHeaders(headers: RequestHeader[]): RequestHeader[] {
     .filter((h) => h.key.length > 0);
 }
 
+function maybePrettifyJson(text: string): string {
+  // Avoid huge parse costs; keep it conservative for now.
+  if (text.length > 300_000) return text;
+  const trimmed = text.trim();
+  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return text;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return text;
+  }
+}
+
 export function App() {
   const { exit } = useApp();
+  const quit = () => {
+    terminateRustWorker("quit");
+    exit();
+  };
   const { isRawModeSupported } = useStdin();
 
-  const [activeField, setActiveField] = useState<ActiveField>("url");
+  const [focus, setFocus] = useState<FocusTarget>("topbar");
+  const [topbarField, setTopbarField] = useState<TopbarField>("url");
+  const [requestTab, setRequestTab] = useState<RequestTab>("headers");
+  const [responseTab, setResponseTab] = useState<ResponseTab>("body");
+  const [requestField, setRequestField] = useState<RequestField>("headerKey");
 
   const [method, setMethod] = useState<HttpMethod>("GET");
   const [url, setUrl] = useState<string>("https://httpbin.org/get");
@@ -109,6 +146,25 @@ export function App() {
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [response, setResponse] = useState<FfiResponse | null>(null);
+
+  const responseBodyForView = useMemo(() => {
+    if (!response) return "";
+    return maybePrettifyJson(response.body);
+  }, [response]);
+
+  // Keep requestField consistent with the active request tab to avoid
+  // multiple inputs being active at once.
+  useEffect(() => {
+    if (requestTab === "headers") {
+      if (requestField !== "headerKey" && requestField !== "headerValue") {
+        setRequestField("headerKey");
+      }
+    } else if (requestTab === "body") {
+      if (requestField !== "contentType" && requestField !== "body") {
+        setRequestField("contentType");
+      }
+    }
+  }, [requestTab, requestField]);
 
   const request: FfiRequest = useMemo(
     () => ({
@@ -133,7 +189,8 @@ export function App() {
     try {
       const res = await sendRequestViaRust(request);
       setResponse(res);
-      setActiveField("none");
+      setResponseTab("body");
+      setFocus("responseTabs");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -142,16 +199,23 @@ export function App() {
   }
 
   const tabNext = () => {
-    const order: ActiveField[] = [
-      "method",
-      "url",
-      "headerKey",
-      "headerValue",
-      "contentType",
-      "body",
+    // Special-case: topbar contains 2 focusable controls.
+    if (focus === "topbar") {
+      if (topbarField === "method") setTopbarField("url");
+      else setFocus("requestTabs");
+      return;
+    }
+
+    const order: FocusTarget[] = [
+      "topbar",
+      "requestTabs",
+      "requestPane",
+      "responseTabs",
     ];
-    const idx = Math.max(0, order.indexOf(activeField));
-    setActiveField(order[(idx + 1) % order.length] ?? "url");
+    const idx = Math.max(0, order.indexOf(focus));
+    const next = order[(idx + 1) % order.length] ?? "topbar";
+    setFocus(next);
+    if (next === "topbar") setTopbarField("url");
   };
 
   // In non-interactive environments (like CI), Ink can't enable raw mode.
@@ -170,138 +234,313 @@ export function App() {
     );
   }
 
-  return (
-    <Box flexDirection="column" gap={1} padding={1}>
-      {isRawModeSupported ? (
-        <KeyboardShortcuts
-          onExit={exit}
-          onSend={() => {
-            void send();
-          }}
-          onTab={tabNext}
-        />
-      ) : null}
+  const requestTabs = [
+    { id: "headers", label: "Headers" },
+    { id: "body", label: "Body" },
+    { id: "query", label: "Query" },
+    { id: "auth", label: "Auth" },
+    { id: "info", label: "Info" },
+    { id: "options", label: "Options" },
+  ] as const;
 
+  const responseTabs = [
+    { id: "body", label: "Body" },
+    { id: "headers", label: "Headers" },
+    { id: "trace", label: "Trace" },
+  ] as const;
+
+  const TopBar = (
+    <Box
+      flexDirection="row"
+      gap={1}
+      borderStyle="round"
+      paddingX={1}
+      paddingY={0}
+    >
+      <Box flexDirection="column" width={10}>
+        <Text dimColor>Method</Text>
+        <Select
+          isDisabled={
+            focus !== "topbar" || topbarField !== "method" || isSending
+          }
+          options={methodOptions}
+          defaultValue={method}
+          onChange={(value) => setMethod(value as HttpMethod)}
+        />
+      </Box>
+
+      <Box flexDirection="column" flexGrow={1}>
+        <Text dimColor>URL</Text>
+        <TextInput
+          isDisabled={focus !== "topbar" || topbarField !== "url" || isSending}
+          defaultValue={url}
+          onChange={setUrl}
+        />
+      </Box>
+
+      <Box flexDirection="column" width={26} alignItems="flex-end">
+        <Text dimColor>Send</Text>
+        {isSending ? (
+          <Spinner label="Sending..." />
+        ) : response ? (
+          <Text>
+            <Text color={response.status < 400 ? "green" : "red"} bold>
+              {response.status}
+            </Text>{" "}
+            <Text dimColor>{response.durationMs}ms</Text>
+          </Text>
+        ) : (
+          <Text dimColor>Ready</Text>
+        )}
+      </Box>
+    </Box>
+  );
+
+  const Sidebar = (
+    <Box flexDirection="column" borderStyle="round" paddingX={1} paddingY={0}>
       <Box justifyContent="space-between">
-        <Text bold>Pigeon (Ink + Bun + Rust FFI)</Text>
-        <Text dimColor>
-          Send: ^j (ctrl+j) · Quit: q / ^c · Next: tab
-          {isRawModeSupported ? "" : " · (input disabled: no raw mode)"}
-        </Text>
+        <Text bold>Collection</Text>
+        <Text dimColor>(placeholder)</Text>
+      </Box>
+      <Text dimColor>- sample-collections</Text>
+      <Text>GET echo</Text>
+      <Text dimColor>GET get random user</Text>
+      <Text dimColor>POS echo post</Text>
+    </Box>
+  );
+
+  const RequestPane = (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      paddingX={1}
+      paddingY={0}
+      flexGrow={1}
+    >
+      <Box justifyContent="space-between">
+        <Text bold>Request</Text>
+        <Text dimColor>{formatHeaderPreview(headers)}</Text>
+      </Box>
+      <TabBar
+        tabs={requestTabs as any}
+        activeTab={requestTab}
+        isActive={focus === "requestTabs"}
+        onChange={(t) => setRequestTab(t)}
+      />
+
+      <Box marginTop={1} flexDirection="column">
+        {requestTab === "headers" ? (
+          <Box flexDirection="column" gap={1}>
+            <Text dimColor>Header Key/Value (simple editor for now)</Text>
+            <Box gap={1}>
+              <Box flexDirection="column" flexGrow={1}>
+                <Text dimColor>Key</Text>
+                <TextInput
+                  key={`header-key-${headerInputNonce}`}
+                  isDisabled={
+                    focus !== "requestPane" ||
+                    requestTab !== "headers" ||
+                    requestField !== "headerKey" ||
+                    isSending
+                  }
+                  placeholder="Content-Type"
+                  onChange={setHeaderKey}
+                  onSubmit={() => setRequestField("headerValue")}
+                />
+              </Box>
+              <Box flexDirection="column" flexGrow={2}>
+                <Text dimColor>Value</Text>
+                <TextInput
+                  key={`header-value-${headerInputNonce}`}
+                  isDisabled={
+                    focus !== "requestPane" ||
+                    requestTab !== "headers" ||
+                    requestField !== "headerValue" ||
+                    isSending
+                  }
+                  placeholder="application/json"
+                  onChange={setHeaderValue}
+                  onSubmit={() => {
+                    const k = headerKey.trim();
+                    if (k.length > 0) {
+                      setHeaders((prev) => [
+                        ...prev,
+                        { key: k, value: headerValue, enabled: true },
+                      ]);
+                      setHeaderKey("");
+                      setHeaderValue("");
+                      setHeaderInputNonce((n) => n + 1);
+                    }
+                    setRequestField("headerKey");
+                  }}
+                />
+              </Box>
+            </Box>
+
+            <Box flexDirection="column" marginTop={1}>
+              <Text dimColor>Current headers</Text>
+              {normalizeHeaders(headers).length === 0 ? (
+                <Text dimColor>There are no headers.</Text>
+              ) : (
+                normalizeHeaders(headers)
+                  .slice(0, 8)
+                  .map((h, i) => (
+                    <Text key={`${h.key}-${i}`}>
+                      {h.key}: {h.value}
+                    </Text>
+                  ))
+              )}
+            </Box>
+          </Box>
+        ) : requestTab === "body" ? (
+          <Box flexDirection="column" gap={1}>
+            <Box flexDirection="column">
+              <Text dimColor>Content-Type</Text>
+              <TextInput
+                isDisabled={
+                  focus !== "requestPane" ||
+                  requestTab !== "body" ||
+                  requestField !== "contentType" ||
+                  isSending
+                }
+                defaultValue={contentType}
+                onChange={setContentType}
+                onSubmit={() => setRequestField("body")}
+              />
+            </Box>
+            <TextArea
+              title="Body"
+              value={body}
+              isActive={
+                focus === "requestPane" &&
+                requestTab === "body" &&
+                requestField === "body"
+              }
+              height={10}
+              onChange={setBody}
+            />
+          </Box>
+        ) : (
+          <Text dimColor>Not implemented yet.</Text>
+        )}
+      </Box>
+    </Box>
+  );
+
+  const ResponsePane = (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      paddingX={1}
+      paddingY={0}
+      flexGrow={1}
+    >
+      <Box justifyContent="space-between">
+        <Text bold>Response</Text>
+        {response ? (
+          <Text dimColor>
+            {response.status} · {response.durationMs}ms
+          </Text>
+        ) : (
+          <Text dimColor>—</Text>
+        )}
+      </Box>
+
+      <TabBar
+        tabs={responseTabs as any}
+        activeTab={responseTab}
+        isActive={focus === "responseTabs"}
+        onChange={(t) => setResponseTab(t)}
+      />
+
+      <Box marginTop={1} flexDirection="column">
+        {!response ? (
+          <Text dimColor>No response yet. Press ctrl+j to send.</Text>
+        ) : responseTab === "headers" ? (
+          <TextArea
+            title="Headers"
+            value={response.headers.map(([k, v]) => `${k}: ${v}`).join("\n")}
+            isActive={focus === "responseTabs"}
+            height={10}
+            readOnly
+          />
+        ) : responseTab === "trace" ? (
+          <TextArea
+            title="Trace"
+            value={
+              "(placeholder)\n\nWe can add timing breakdown / redirects / DNS / TLS, etc."
+            }
+            isActive={focus === "responseTabs"}
+            height={10}
+            readOnly
+          />
+        ) : (
+          <Box flexDirection="column" gap={1}>
+            <TextArea
+              title="Body"
+              value={responseBodyForView}
+              isActive={focus === "responseTabs"}
+              height={10}
+              readOnly
+            />
+          </Box>
+        )}
+      </Box>
+    </Box>
+  );
+
+  const RightPane = (
+    <VSplit
+      top={RequestPane}
+      bottom={ResponsePane}
+      topFlex={2}
+      bottomFlex={2}
+      gap={1}
+    />
+  );
+
+  return (
+    <Box flexDirection="column" padding={1} width="100%">
+      <KeyboardShortcuts
+        onExit={quit}
+        onSend={() => {
+          void send();
+        }}
+        onTab={tabNext}
+        onFocusMethod={() => {
+          setFocus("topbar");
+          setTopbarField("method");
+        }}
+        onFocusUrl={() => {
+          setFocus("topbar");
+          setTopbarField("url");
+        }}
+      />
+
+      <Box justifyContent="space-between" marginBottom={1}>
+        <Text bold>Posting-like Pigeon</Text>
+        <Text dimColor>Focus: {focus}</Text>
       </Box>
 
       {error ? <StatusMessage variant="error">{error}</StatusMessage> : null}
 
-      <Box flexDirection="column" gap={1}>
-        <Box flexDirection="column">
-          <Text dimColor>Method</Text>
-          <Select
-            isDisabled={activeField !== "method" || isSending}
-            options={methodOptions}
-            defaultValue={method}
-            onChange={(value) => setMethod(value as HttpMethod)}
+      <Box flexDirection="column" gap={1} width="100%">
+        {TopBar}
+
+        <HSplit left={Sidebar} right={RightPane} leftWidth={32} gap={1} />
+
+        <Box borderStyle="round" paddingX={1} paddingY={0}>
+          <KeyHints
+            items={[
+              { key: "^j", label: "Send" },
+              { key: "^t", label: "Method" },
+              { key: "^l", label: "URL" },
+              { key: "tab", label: "Focus next" },
+              { key: "←/→", label: "Switch tab" },
+              { key: "q", label: "Quit" },
+            ]}
           />
         </Box>
-
-        <Box flexDirection="column">
-          <Text dimColor>URL</Text>
-          <TextInput
-            isDisabled={activeField !== "url" || isSending}
-            defaultValue={url}
-            onChange={setUrl}
-            onSubmit={() => setActiveField("headerKey")}
-          />
-        </Box>
-
-        <Box flexDirection="column">
-          <Text dimColor>Header (press Enter on value to add)</Text>
-          <Box gap={1}>
-            <Box flexDirection="column" flexGrow={1}>
-              <Text dimColor>Key</Text>
-              <TextInput
-                key={`header-key-${headerInputNonce}`}
-                isDisabled={activeField !== "headerKey" || isSending}
-                placeholder="Authorization"
-                onChange={setHeaderKey}
-                onSubmit={() => setActiveField("headerValue")}
-              />
-            </Box>
-            <Box flexDirection="column" flexGrow={2}>
-              <Text dimColor>Value</Text>
-              <TextInput
-                key={`header-value-${headerInputNonce}`}
-                isDisabled={activeField !== "headerValue" || isSending}
-                placeholder="Bearer ..."
-                onChange={setHeaderValue}
-                onSubmit={() => {
-                  const k = headerKey.trim();
-                  if (k.length > 0) {
-                    setHeaders((prev) => [
-                      ...prev,
-                      { key: k, value: headerValue, enabled: true },
-                    ]);
-                    // TextInput is uncontrolled, so remount to clear.
-                    setHeaderKey("");
-                    setHeaderValue("");
-                    setHeaderInputNonce((n) => n + 1);
-                  }
-                  setActiveField("contentType");
-                }}
-              />
-            </Box>
-          </Box>
-          <Text dimColor>Current: {formatHeaderPreview(headers)}</Text>
-        </Box>
-
-        <Box flexDirection="column">
-          <Text dimColor>Content-Type</Text>
-          <TextInput
-            isDisabled={activeField !== "contentType" || isSending}
-            defaultValue={contentType}
-            onChange={setContentType}
-            onSubmit={() => setActiveField("body")}
-          />
-        </Box>
-
-        <Box flexDirection="column">
-          <Text dimColor>Body (single line for now)</Text>
-          <TextInput
-            isDisabled={activeField !== "body" || isSending}
-            placeholder={'{"hello":"world"}'}
-            onChange={setBody}
-            onSubmit={() => setActiveField("none")}
-          />
-        </Box>
-      </Box>
-
-      <Box>
-        {isSending ? (
-          <Spinner label="Sending request via Rust..." />
-        ) : (
-          <Text>Ready.</Text>
-        )}
-      </Box>
-
-      <Box flexDirection="column" borderStyle="round" paddingX={1} paddingY={0}>
-        <Text bold>Response</Text>
-        {response ? (
-          <>
-            <Text>
-              Status: {response.status} {response.statusText} ·{" "}
-              {response.durationMs}ms
-            </Text>
-            <Text dimColor>Headers: {response.headers.length}</Text>
-            {response.headers.slice(0, 8).map(([k, v], i) => (
-              <Text key={`${k}-${i}`}>
-                {k}: {v}
-              </Text>
-            ))}
-            <Text dimColor>Body:</Text>
-            <Text>{response.body.slice(0, 1000)}</Text>
-          </>
-        ) : (
-          <Text dimColor>No response yet. Press ctrl+j to send.</Text>
-        )}
       </Box>
     </Box>
   );
