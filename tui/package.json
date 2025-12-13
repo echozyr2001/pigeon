@@ -1,0 +1,40 @@
+{
+  "name": "pigeon-tui",
+  "version": "0.1.0",
+  "description": "A TUI",
+  "module": "index.ts",
+  "type": "module",
+  "bin": {
+    "pigeon": "./index.ts"
+  },
+  "scripts": {
+    "build:rust": "cargo build --release --lib --manifest-path ../Cargo.toml",
+    "dev": "bun run build:rust && bun run src/index.tsx"
+  },
+  "keywords": [
+    "tui",
+    "http",
+    "client",
+    "terminal",
+    "api",
+    "testing",
+    "textual",
+    "cli",
+    "posting",
+    "developer-tool"
+  ],
+  "author": "echozyr2001 <echo.zyr.2001@gmail.com>",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.7",
+    "react-devtools-core": "^7.0.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@inkjs/ui": "^2.0.0",
+    "ink": "^6.5.1",
+    "react": "^19.2.1"
+  }
+}
