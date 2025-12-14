@@ -34,7 +34,9 @@
   },
   "dependencies": {
     "@inkjs/ui": "^2.0.0",
+    "@xstate/react": "^6.0.0",
     "ink": "^6.5.1",
-    "react": "^19.2.1"
+    "react": "^19.2.1",
+    "xstate": "^5.25.0"
   }
 }

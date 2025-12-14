@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text, useApp, useInput, useStdin } from "ink";
 import { Select, Spinner, StatusMessage, TextInput } from "@inkjs/ui";
+import { useMachine } from "@xstate/react";
 import type {
   FfiRequest,
   FfiResponse,
@@ -14,13 +15,15 @@ import { TabBar } from "@/ui/TabBar";
 import { KeyHints } from "@/ui/KeyHints";
 import { TextArea } from "@/ui/TextArea";
 import { theme } from "@/ui/theme";
-
-type FocusTarget = "topbar" | "requestTabs" | "requestPane" | "responseTabs";
-type TopbarField = "method" | "url";
-type RequestField = "headerKey" | "headerValue" | "contentType" | "body";
-
-type RequestTab = "headers" | "body" | "query" | "auth" | "info" | "options";
-type ResponseTab = "body" | "headers" | "trace";
+import {
+  focusMachine,
+  type FocusTarget,
+  type TopbarField,
+  type RequestField,
+  type RequestTab,
+  type ResponseTab,
+} from "@/machines/focusMachine";
+import { requestMachine, type RequestState } from "@/machines/requestMachine";
 
 const methodOptions: Array<{ label: string; value: HttpMethod }> = [
   { label: "GET", value: "GET" },
@@ -136,11 +139,39 @@ export function App() {
   };
   const { isRawModeSupported } = useStdin();
 
-  const [focus, setFocus] = useState<FocusTarget>("topbar");
-  const [topbarField, setTopbarField] = useState<TopbarField>("url");
-  const [requestTab, setRequestTab] = useState<RequestTab>("headers");
-  const [responseTab, setResponseTab] = useState<ResponseTab>("body");
-  const [requestField, setRequestField] = useState<RequestField>("headerKey");
+  // XState focus management
+  const [focusState, focusSend] = useMachine(focusMachine);
+
+  // XState request lifecycle management
+  const [requestState, requestSend] = useMachine(requestMachine);
+
+  // Derived values from state machines
+  const focus = focusState.value as FocusTarget;
+  const { currentField, requestTab, responseTab } = focusState.context;
+
+  const requestLifecycleState = requestState.value as RequestState;
+  const {
+    request: currentRequest,
+    response,
+    error,
+    isLoading,
+  } = requestState.context;
+
+  // Helper to determine if current field is a topbar field
+  const isTopbarField = (field: string): field is TopbarField =>
+    field === "method" || field === "url";
+
+  // Helper to determine if current field is a request field
+  const isRequestField = (field: string): field is RequestField =>
+    field === "headerKey" ||
+    field === "headerValue" ||
+    field === "contentType" ||
+    field === "body";
+
+  const topbarField = isTopbarField(currentField) ? currentField : "url";
+  const requestField = isRequestField(currentField)
+    ? currentField
+    : "headerKey";
 
   const canQuit = () => {
     // If you're currently editing/typing in a field, `q` should be treated as input.
@@ -165,10 +196,6 @@ export function App() {
   const [contentType, setContentType] = useState<string>("application/json");
   const [body, setBody] = useState<string>("");
 
-  const [isSending, setIsSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [response, setResponse] = useState<FfiResponse | null>(null);
-
   const responseBodyForView = useMemo(() => {
     if (!response) return "";
     return maybePrettifyJson(response.body);
@@ -179,14 +206,14 @@ export function App() {
   useEffect(() => {
     if (requestTab === "headers") {
       if (requestField !== "headerKey" && requestField !== "headerValue") {
-        setRequestField("headerKey");
+        focusSend({ type: "SET_REQUEST_FIELD", field: "headerKey" });
       }
     } else if (requestTab === "body") {
       if (requestField !== "contentType" && requestField !== "body") {
-        setRequestField("contentType");
+        focusSend({ type: "SET_REQUEST_FIELD", field: "contentType" });
       }
     }
-  }, [requestTab, requestField]);
+  }, [requestTab, requestField, focusSend]);
 
   const request: FfiRequest = useMemo(
     () => ({
@@ -205,62 +232,47 @@ export function App() {
   );
 
   async function send() {
-    if (isSending) return;
-    setIsSending(true);
-    setError(null);
+    if (isLoading) return;
+
+    // Prepare the request
+    requestSend({ type: "PREPARE_REQUEST", request });
+
+    // Send the request
+    requestSend({ type: "SEND_REQUEST" });
+
     try {
       const res = await sendRequestViaRust(request);
-      setResponse(res);
-      setResponseTab("body");
-      setFocus("responseTabs");
+      requestSend({ type: "REQUEST_SUCCESS", response: res });
+      focusSend({ type: "SET_RESPONSE_TAB", tab: "body" });
+
+      // Navigate to response tabs based on current state
+      const currentState = focusState.value;
+      if (currentState === "topbar") {
+        // topbar -> requestTabs -> requestPane -> responseTabs
+        focusSend({ type: "TAB_NEXT" });
+        focusSend({ type: "TAB_NEXT" });
+        focusSend({ type: "TAB_NEXT" });
+      } else if (currentState === "requestTabs") {
+        // requestTabs -> requestPane -> responseTabs
+        focusSend({ type: "TAB_NEXT" });
+        focusSend({ type: "TAB_NEXT" });
+      } else if (currentState === "requestPane") {
+        // requestPane -> responseTabs
+        focusSend({ type: "TAB_NEXT" });
+      }
+      // If already on responseTabs, do nothing
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIsSending(false);
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      requestSend({ type: "REQUEST_ERROR", error: errorMessage });
     }
   }
 
   const tabNext = () => {
-    // Special-case: topbar contains 2 focusable controls.
-    if (focus === "topbar") {
-      if (topbarField === "method") setTopbarField("url");
-      else setFocus("requestTabs");
-      return;
-    }
-
-    const order: FocusTarget[] = [
-      "topbar",
-      "requestTabs",
-      "requestPane",
-      "responseTabs",
-    ];
-    const idx = Math.max(0, order.indexOf(focus));
-    const next = order[(idx + 1) % order.length] ?? "topbar";
-    setFocus(next);
-    if (next === "topbar") setTopbarField("url");
+    focusSend({ type: "TAB_NEXT" });
   };
 
   const tabPrev = () => {
-    // Special-case: topbar contains 2 focusable controls.
-    if (focus === "topbar") {
-      if (topbarField === "url") {
-        setTopbarField("method");
-      } else {
-        setFocus("responseTabs");
-      }
-      return;
-    }
-
-    const order: FocusTarget[] = [
-      "topbar",
-      "requestTabs",
-      "requestPane",
-      "responseTabs",
-    ];
-    const idx = Math.max(0, order.indexOf(focus));
-    const next = order[(idx - 1 + order.length) % order.length] ?? "topbar";
-    setFocus(next);
-    if (next === "topbar") setTopbarField("url");
+    focusSend({ type: "TAB_PREV" });
   };
 
   // In non-interactive environments (like CI), Ink can't enable raw mode.
@@ -311,7 +323,7 @@ export function App() {
         <Text dimColor>Method</Text>
         <Select
           isDisabled={
-            focus !== "topbar" || topbarField !== "method" || isSending
+            focus !== "topbar" || topbarField !== "method" || isLoading
           }
           options={methodOptions}
           defaultValue={method}
@@ -322,7 +334,7 @@ export function App() {
       <Box flexDirection="column" flexGrow={1}>
         <Text dimColor>URL</Text>
         <TextInput
-          isDisabled={focus !== "topbar" || topbarField !== "url" || isSending}
+          isDisabled={focus !== "topbar" || topbarField !== "url" || isLoading}
           defaultValue={url}
           onChange={setUrl}
         />
@@ -330,7 +342,7 @@ export function App() {
 
       <Box flexDirection="column" width={26} alignItems="flex-end">
         <Text dimColor>Send</Text>
-        {isSending ? (
+        {isLoading ? (
           <Spinner label="Sending..." />
         ) : response ? (
           <Text>
@@ -382,7 +394,7 @@ export function App() {
         tabs={requestTabs as any}
         activeTab={requestTab}
         isActive={focus === "requestTabs"}
-        onChange={(t) => setRequestTab(t)}
+        onChange={(t) => focusSend({ type: "SET_REQUEST_TAB", tab: t })}
       />
 
       <Box marginTop={1} flexDirection="column">
@@ -398,11 +410,16 @@ export function App() {
                     focus !== "requestPane" ||
                     requestTab !== "headers" ||
                     requestField !== "headerKey" ||
-                    isSending
+                    isLoading
                   }
                   placeholder="Content-Type"
                   onChange={setHeaderKey}
-                  onSubmit={() => setRequestField("headerValue")}
+                  onSubmit={() =>
+                    focusSend({
+                      type: "SET_REQUEST_FIELD",
+                      field: "headerValue",
+                    })
+                  }
                 />
               </Box>
               <Box flexDirection="column" flexGrow={2}>
@@ -413,7 +430,7 @@ export function App() {
                     focus !== "requestPane" ||
                     requestTab !== "headers" ||
                     requestField !== "headerValue" ||
-                    isSending
+                    isLoading
                   }
                   placeholder="application/json"
                   onChange={setHeaderValue}
@@ -428,7 +445,10 @@ export function App() {
                       setHeaderValue("");
                       setHeaderInputNonce((n) => n + 1);
                     }
-                    setRequestField("headerKey");
+                    focusSend({
+                      type: "SET_REQUEST_FIELD",
+                      field: "headerKey",
+                    });
                   }}
                 />
               </Box>
@@ -458,11 +478,13 @@ export function App() {
                   focus !== "requestPane" ||
                   requestTab !== "body" ||
                   requestField !== "contentType" ||
-                  isSending
+                  isLoading
                 }
                 defaultValue={contentType}
                 onChange={setContentType}
-                onSubmit={() => setRequestField("body")}
+                onSubmit={() =>
+                  focusSend({ type: "SET_REQUEST_FIELD", field: "body" })
+                }
               />
             </Box>
             <TextArea
@@ -508,7 +530,7 @@ export function App() {
         tabs={responseTabs as any}
         activeTab={responseTab}
         isActive={focus === "responseTabs"}
-        onChange={(t) => setResponseTab(t)}
+        onChange={(t) => focusSend({ type: "SET_RESPONSE_TAB", tab: t })}
       />
 
       <Box marginTop={1} flexDirection="column">
@@ -567,12 +589,10 @@ export function App() {
         onTab={tabNext}
         onTabPrev={tabPrev}
         onFocusMethod={() => {
-          setFocus("topbar");
-          setTopbarField("method");
+          focusSend({ type: "FOCUS_METHOD" });
         }}
         onFocusUrl={() => {
-          setFocus("topbar");
-          setTopbarField("url");
+          focusSend({ type: "FOCUS_URL" });
         }}
         canQuit={canQuit}
       />
