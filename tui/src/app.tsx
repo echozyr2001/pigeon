@@ -1,29 +1,24 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Box, Text, useApp, useInput, useStdin } from "ink";
 import { Select, Spinner, StatusMessage, TextInput } from "@inkjs/ui";
 import { useMachine } from "@xstate/react";
-import type {
-  FfiRequest,
-  FfiResponse,
-  HttpMethod,
-  RequestHeader,
-} from "@/types";
+import type { FfiRequest, HttpMethod, RequestHeader } from "@/types";
 import { sendRequestViaRust } from "@/ffi/client";
 import { terminateRustWorker } from "@/ffi/client";
 import { HSplit, VSplit } from "@/ui/SplitPane";
 import { TabBar } from "@/ui/TabBar";
 import { KeyHints } from "@/ui/KeyHints";
 import { TextArea } from "@/ui/TextArea";
+import { DebugPanel } from "@/ui/DebugPanel";
 import { theme } from "@/ui/theme";
 import {
   focusMachine,
   type FocusTarget,
   type TopbarField,
   type RequestField,
-  type RequestTab,
-  type ResponseTab,
 } from "@/machines/focusMachine";
 import { requestMachine, type RequestState } from "@/machines/requestMachine";
+import { useXStateDebug } from "@/debug/xstateDebug";
 
 const methodOptions: Array<{ label: string; value: HttpMethod }> = [
   { label: "GET", value: "GET" },
@@ -42,6 +37,8 @@ function KeyboardShortcuts(props: {
   onTabPrev?: () => void;
   onFocusMethod?: () => void;
   onFocusUrl?: () => void;
+  onToggleDebug?: () => void;
+  onClearDebugLogs?: () => void;
   canQuit?: () => boolean;
 }) {
   useInput((input, key) => {
@@ -95,6 +92,16 @@ function KeyboardShortcuts(props: {
     if (key.ctrl && input === "l") {
       props.onFocusUrl?.();
     }
+
+    // Toggle debug panel
+    if (input === "d" && !key.ctrl) {
+      props.onToggleDebug?.();
+    }
+
+    // Clear debug logs
+    if (key.ctrl && input === "i") {
+      props.onClearDebugLogs?.();
+    }
   });
 
   return null;
@@ -139,23 +146,54 @@ export function App() {
   };
   const { isRawModeSupported } = useStdin();
 
-  // XState focus management
-  const [focusState, focusSend] = useMachine(focusMachine);
+  // XState debugging with enhanced logging
+  const { startTransition, logTransition, logError, clearLogs } =
+    useXStateDebug();
+  const [debugPanelVisible, setDebugPanelVisible] = useState(false);
 
-  // XState request lifecycle management
+  // XState machines
+  const [focusState, focusSend] = useMachine(focusMachine);
   const [requestState, requestSend] = useMachine(requestMachine);
+
+  // Track state transitions for debugging with enhanced context
+  const [prevFocusState, setPrevFocusState] = useState(focusState.value);
+  const [prevRequestState, setPrevRequestState] = useState(requestState.value);
+
+  useEffect(() => {
+    if (prevFocusState !== focusState.value) {
+      logTransition(
+        "focus",
+        prevFocusState,
+        focusState.value,
+        { type: "STATE_CHANGE" },
+        undefined, // transitionKey
+        focusState.context, // context
+        { timestamp: new Date().toISOString() } // meta
+      );
+      setPrevFocusState(focusState.value);
+    }
+  }, [focusState.value, prevFocusState, logTransition]);
+
+  useEffect(() => {
+    if (prevRequestState !== requestState.value) {
+      logTransition(
+        "request",
+        prevRequestState,
+        requestState.value,
+        { type: "STATE_CHANGE" },
+        undefined, // transitionKey
+        requestState.context, // context
+        { timestamp: new Date().toISOString() } // meta
+      );
+      setPrevRequestState(requestState.value);
+    }
+  }, [requestState.value, prevRequestState, logTransition]);
 
   // Derived values from state machines
   const focus = focusState.value as FocusTarget;
   const { currentField, requestTab, responseTab } = focusState.context;
 
-  const requestLifecycleState = requestState.value as RequestState;
-  const {
-    request: currentRequest,
-    response,
-    error,
-    isLoading,
-  } = requestState.context;
+  const { response, error, isLoading } = requestState.context;
 
   // Helper to determine if current field is a topbar field
   const isTopbarField = (field: string): field is TopbarField =>
@@ -234,13 +272,19 @@ export function App() {
   async function send() {
     if (isLoading) return;
 
-    // Prepare the request
-    requestSend({ type: "PREPARE_REQUEST", request });
-
-    // Send the request
-    requestSend({ type: "SEND_REQUEST" });
+    const transitionKey = startTransition(
+      "request",
+      { type: "SEND_REQUEST" },
+      requestState.context
+    );
 
     try {
+      // Prepare the request
+      requestSend({ type: "PREPARE_REQUEST", request });
+
+      // Send the request
+      requestSend({ type: "SEND_REQUEST" });
+
       const res = await sendRequestViaRust(request);
       requestSend({ type: "REQUEST_SUCCESS", response: res });
       focusSend({ type: "SET_RESPONSE_TAB", tab: "body" });
@@ -264,15 +308,52 @@ export function App() {
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
       requestSend({ type: "REQUEST_ERROR", error: errorMessage });
+
+      // Enhanced error logging with full context
+      logError(
+        "request",
+        e as Error,
+        { type: "SEND_REQUEST" }, // event that caused the error
+        {
+          request,
+          currentState: requestState.value,
+          focusState: focusState.value,
+        }, // context
+        requestState.value // current state
+      );
     }
   }
 
   const tabNext = () => {
-    focusSend({ type: "TAB_NEXT" });
+    try {
+      focusSend({ type: "TAB_NEXT" });
+    } catch (error) {
+      logError(
+        "focus",
+        error as Error,
+        { type: "TAB_NEXT" },
+        focusState.context,
+        focusState.value
+      );
+    }
   };
 
   const tabPrev = () => {
-    focusSend({ type: "TAB_PREV" });
+    try {
+      focusSend({ type: "TAB_PREV" });
+    } catch (error) {
+      logError(
+        "focus",
+        error as Error,
+        { type: "TAB_PREV" },
+        focusState.context,
+        focusState.value
+      );
+    }
+  };
+
+  const toggleDebugPanel = () => {
+    setDebugPanelVisible(!debugPanelVisible);
   };
 
   // In non-interactive environments (like CI), Ink can't enable raw mode.
@@ -539,7 +620,9 @@ export function App() {
         ) : responseTab === "headers" ? (
           <TextArea
             title="Headers"
-            value={response.headers.map(([k, v]) => `${k}: ${v}`).join("\n")}
+            value={response.headers
+              .map(([k, v]: [string, string]) => `${k}: ${v}`)
+              .join("\n")}
             isActive={focus === "responseTabs"}
             height={10}
             readOnly
@@ -589,11 +672,33 @@ export function App() {
         onTab={tabNext}
         onTabPrev={tabPrev}
         onFocusMethod={() => {
-          focusSend({ type: "FOCUS_METHOD" });
+          try {
+            focusSend({ type: "FOCUS_METHOD" });
+          } catch (error) {
+            logError(
+              "focus",
+              error as Error,
+              { type: "FOCUS_METHOD" },
+              focusState.context,
+              focusState.value
+            );
+          }
         }}
         onFocusUrl={() => {
-          focusSend({ type: "FOCUS_URL" });
+          try {
+            focusSend({ type: "FOCUS_URL" });
+          } catch (error) {
+            logError(
+              "focus",
+              error as Error,
+              { type: "FOCUS_URL" },
+              focusState.context,
+              focusState.value
+            );
+          }
         }}
+        onToggleDebug={toggleDebugPanel}
+        onClearDebugLogs={clearLogs}
         canQuit={canQuit}
       />
 
@@ -609,6 +714,8 @@ export function App() {
 
         <HSplit left={Sidebar} right={RightPane} leftWidth={32} gap={1} />
 
+        {debugPanelVisible && <DebugPanel isVisible={debugPanelVisible} />}
+
         <Box borderStyle="round" paddingX={1} paddingY={0}>
           <KeyHints
             items={[
@@ -618,6 +725,8 @@ export function App() {
               { key: "tab", label: "Focus next" },
               { key: "shift+tab", label: "Focus prev" },
               { key: "←/→", label: "Switch tab" },
+              { key: "d", label: "Debug" },
+              { key: "^i", label: "Clear logs" },
               { key: "q", label: "Quit" },
             ]}
           />

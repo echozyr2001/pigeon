@@ -1,5 +1,6 @@
 import { createMachine, assign } from "xstate";
 import type { FfiRequest, FfiResponse } from "@/types";
+import { createDebugMachine } from "@/debug/xstateDebug";
 
 // Request lifecycle states
 export type RequestState =
@@ -9,15 +10,15 @@ export type RequestState =
   | "completed"
   | "error";
 
-// Context interface for request lifecycle
+// Context interface
 export interface RequestContext {
   request?: FfiRequest;
   response?: FfiResponse;
   error?: string;
-  isLoading: boolean; // preparing and sending
+  isLoading: boolean;
 }
 
-// Events for request lifecycle
+// Events
 export type RequestEvent =
   | { type: "PREPARE_REQUEST"; request: FfiRequest }
   | { type: "SEND_REQUEST" }
@@ -25,8 +26,8 @@ export type RequestEvent =
   | { type: "REQUEST_ERROR"; error: string }
   | { type: "RESET" };
 
-// Request lifecycle state machine
-export const requestMachine = createMachine({
+// Request lifecycle state machine with debugging
+const baseRequestMachine = createMachine({
   id: "request",
   types: {} as {
     context: RequestContext;
@@ -39,40 +40,41 @@ export const requestMachine = createMachine({
     error: undefined,
     isLoading: false,
   },
+
   states: {
     idle: {
-      entry: assign({
-        isLoading: false,
-        error: undefined,
-      }),
       on: {
         PREPARE_REQUEST: {
           target: "preparing",
           actions: assign({
             request: ({ event }) => event.request,
-            response: undefined,
             error: undefined,
+            response: undefined,
+            isLoading: true,
           }),
         },
       },
     },
     preparing: {
-      entry: assign({
-        isLoading: true,
-      }),
       on: {
         SEND_REQUEST: {
           target: "sending",
+          actions: assign({
+            isLoading: true,
+          }),
         },
         RESET: {
           target: "idle",
+          actions: assign({
+            request: undefined,
+            error: undefined,
+            response: undefined,
+            isLoading: false,
+          }),
         },
       },
     },
     sending: {
-      entry: assign({
-        isLoading: true,
-      }),
       on: {
         REQUEST_SUCCESS: {
           target: "completed",
@@ -87,49 +89,65 @@ export const requestMachine = createMachine({
           actions: assign({
             error: ({ event }) => event.error,
             isLoading: false,
-            response: undefined,
           }),
         },
         RESET: {
           target: "idle",
+          actions: assign({
+            request: undefined,
+            error: undefined,
+            response: undefined,
+            isLoading: false,
+          }),
         },
       },
     },
     completed: {
-      entry: assign({
-        isLoading: false,
-      }),
       on: {
         PREPARE_REQUEST: {
           target: "preparing",
           actions: assign({
             request: ({ event }) => event.request,
-            response: undefined,
             error: undefined,
+            response: undefined,
+            isLoading: true,
           }),
         },
         RESET: {
           target: "idle",
+          actions: assign({
+            request: undefined,
+            error: undefined,
+            response: undefined,
+            isLoading: false,
+          }),
         },
       },
     },
     error: {
-      entry: assign({
-        isLoading: false,
-      }),
       on: {
         PREPARE_REQUEST: {
           target: "preparing",
           actions: assign({
             request: ({ event }) => event.request,
-            response: undefined,
             error: undefined,
+            response: undefined,
+            isLoading: true,
           }),
         },
         RESET: {
           target: "idle",
+          actions: assign({
+            request: undefined,
+            error: undefined,
+            response: undefined,
+            isLoading: false,
+          }),
         },
       },
     },
   },
 });
+
+// Export the machine with debugging capabilities
+export const requestMachine = createDebugMachine(baseRequestMachine);

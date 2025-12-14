@@ -1,4 +1,5 @@
 import { createMachine, assign } from "xstate";
+import { createDebugMachine } from "@/debug/xstateDebug";
 
 // Types for focus management
 export type FocusTarget =
@@ -34,8 +35,8 @@ export type FocusEvent =
   | { type: "SET_RESPONSE_TAB"; tab: ResponseTab }
   | { type: "SET_REQUEST_FIELD"; field: RequestField };
 
-// Focus management state machine
-export const focusMachine = createMachine({
+// Focus management state machine with debugging
+const baseFocusMachine = createMachine({
   id: "focus",
   types: {} as {
     context: FocusContext;
@@ -47,6 +48,7 @@ export const focusMachine = createMachine({
     requestTab: "headers" as RequestTab,
     responseTab: "body" as ResponseTab,
   },
+
   states: {
     topbar: {
       on: {
@@ -61,12 +63,7 @@ export const focusMachine = createMachine({
             target: "requestTabs",
           },
         ],
-        TAB_PREV: {
-          target: "responseTabs",
-          actions: assign({
-            currentField: "url" as TopbarField,
-          }),
-        },
+        TAB_PREV: "responseTabs",
         FOCUS_METHOD: {
           actions: assign({
             currentField: "method" as TopbarField,
@@ -77,71 +74,58 @@ export const focusMachine = createMachine({
             currentField: "url" as TopbarField,
           }),
         },
+        SET_REQUEST_TAB: {
+          actions: assign({
+            requestTab: ({ event }) => event.tab,
+          }),
+        },
+        SET_RESPONSE_TAB: {
+          actions: assign({
+            responseTab: ({ event }) => event.tab,
+          }),
+        },
       },
     },
     requestTabs: {
       on: {
-        TAB_NEXT: {
-          target: "requestPane",
-        },
-        TAB_PREV: {
-          target: "topbar",
-          actions: assign({
-            currentField: "url" as TopbarField,
-          }),
-        },
+        TAB_NEXT: "requestPane",
+        TAB_PREV: "topbar",
         SET_REQUEST_TAB: {
           actions: assign({
             requestTab: ({ event }) => event.tab,
+          }),
+        },
+        SET_RESPONSE_TAB: {
+          actions: assign({
+            responseTab: ({ event }) => event.tab,
           }),
         },
       },
     },
     requestPane: {
       entry: assign({
-        currentField: ({ context }) => {
-          // Set appropriate field based on current request tab
-          switch (context.requestTab) {
-            case "headers":
-              return "headerKey" as RequestField;
-            case "body":
-              return "contentType" as RequestField;
-            default:
-              return "headerKey" as RequestField;
-          }
-        },
+        currentField: ({ context }) =>
+          context.requestTab === "headers" ? "headerKey" : "contentType",
       }),
       on: {
-        TAB_NEXT: {
-          target: "responseTabs",
-        },
-        TAB_PREV: {
-          target: "requestTabs",
-        },
+        TAB_NEXT: "responseTabs",
+        TAB_PREV: "requestTabs",
         SET_REQUEST_FIELD: {
           actions: assign({
             currentField: ({ event }) => event.field,
           }),
         },
         SET_REQUEST_TAB: {
-          actions: [
-            assign({
-              requestTab: ({ event }) => event.tab,
-            }),
-            assign({
-              currentField: ({ event }) => {
-                // Update field based on new tab
-                switch (event.tab) {
-                  case "headers":
-                    return "headerKey" as RequestField;
-                  case "body":
-                    return "contentType" as RequestField;
-                  default:
-                    return "headerKey" as RequestField;
-                }
-              },
-            }),
-          ],
+          actions: assign({
+            requestTab: ({ event }) => event.tab,
+            currentField: ({ event }) =>
+              event.tab === "headers" ? "headerKey" : "contentType",
+          }),
+        },
+        SET_RESPONSE_TAB: {
+          actions: assign({
+            responseTab: ({ event }) => event.tab,
+          }),
         },
       },
     },
@@ -153,8 +137,11 @@ export const focusMachine = createMachine({
             currentField: "url" as TopbarField,
           }),
         },
-        TAB_PREV: {
-          target: "requestPane",
+        TAB_PREV: "requestPane",
+        SET_REQUEST_TAB: {
+          actions: assign({
+            requestTab: ({ event }) => event.tab,
+          }),
         },
         SET_RESPONSE_TAB: {
           actions: assign({
@@ -165,3 +152,6 @@ export const focusMachine = createMachine({
     },
   },
 });
+
+// Export the machine with debugging capabilities
+export const focusMachine = createDebugMachine(baseFocusMachine);
