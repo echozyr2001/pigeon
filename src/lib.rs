@@ -251,8 +251,14 @@ pub unsafe extern "C" fn pigeon_load_config() -> *mut c_char {
             }
         }
 
-        // Store runtime globally
-        LUA_RUNTIME.set(runtime).ok();
+        // Store runtime globally. If this fails, the runtime was already initialized
+        // and we should report an error instead of silently succeeding.
+        if LUA_RUNTIME.set(runtime).is_err() {
+            return string_to_c_char_ptr(
+                r#"{"error": "Lua runtime already initialized; use pigeon_reload_config instead"}"#
+                    .to_string(),
+            );
+        }
 
         // Return success JSON object (not "null" string)
         string_to_c_char_ptr(r#"{"success": true}"#.to_string())
