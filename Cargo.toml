@@ -14,3 +14,5 @@ tokio = { version = "1.0", features = ["full"] }
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
+mlua = { version = "0.9", features = ["lua54", "async", "send", "vendored"] }
+dirs = "5.0"

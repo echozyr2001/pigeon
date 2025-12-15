@@ -2,12 +2,16 @@
 #[allow(dead_code)]
 mod model;
 
+mod lua;
+
+use lua::LuaRuntime;
 use serde::{Deserialize, Serialize};
 use std::ffi::{c_char, CStr, CString};
 use std::panic::AssertUnwindSafe;
 use std::sync::OnceLock;
 
 static TOKIO_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+static LUA_RUNTIME: OnceLock<LuaRuntime> = OnceLock::new();
 
 fn get_tokio_runtime() -> &'static tokio::runtime::Runtime {
     TOKIO_RUNTIME.get_or_init(|| {
@@ -176,5 +180,132 @@ pub unsafe extern "C" fn pigeon_free_string(ptr: *mut c_char) {
     }
     unsafe {
         drop(CString::from_raw(ptr));
+    }
+}
+
+/// Initialize the Lua runtime and load the configuration file.
+///
+/// # Safety
+/// - Returns a JSON string: `{"success": true}` on success or
+///   `{"error": "...message..."}` on failure.
+/// - Returned pointer must be freed by calling `pigeon_free_string`.
+#[no_mangle]
+pub unsafe extern "C" fn pigeon_load_config() -> *mut c_char {
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        // Get config directory
+        // Prefer XDG (~/.config/pigeon), fallback to platform config dir
+        let config_dir = if let Some(home) = dirs::home_dir() {
+            let xdg_config = home.join(".config").join("pigeon");
+            if xdg_config.exists() || home.join(".config").exists() {
+                match std::fs::create_dir_all(&xdg_config) {
+                    Ok(_) => Ok(xdg_config),
+                    Err(e) => Err(format!("Failed to create config directory: {}", e)),
+                }
+            } else {
+                dirs::config_dir()
+                    .ok_or_else(|| "Failed to get config directory".to_string())
+                    .and_then(|mut dir| {
+                        dir.push("pigeon");
+                        std::fs::create_dir_all(&dir)
+                            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+                        Ok(dir)
+                    })
+            }
+        } else {
+            dirs::config_dir()
+                .ok_or_else(|| "Failed to get config directory".to_string())
+                .and_then(|mut dir| {
+                    dir.push("pigeon");
+                    std::fs::create_dir_all(&dir)
+                        .map_err(|e| format!("Failed to create config directory: {}", e))?;
+                    Ok(dir)
+                })
+        };
+
+        let config_dir = match config_dir {
+            Ok(dir) => dir,
+            Err(e) => return string_to_c_char_ptr(format!(r#"{{"error": "{}"}}"#, e)),
+        };
+
+        // Create Lua runtime
+        let runtime = match LuaRuntime::new(&config_dir) {
+            Ok(rt) => rt,
+            Err(e) => {
+                return string_to_c_char_ptr(format!(
+                    r#"{{"error": "Failed to create Lua runtime: {}"}}"#,
+                    e
+                ));
+            }
+        };
+
+        // Load config file
+        let mut config_file = config_dir.clone();
+        config_file.push("config.lua");
+
+        if config_file.exists() {
+            if let Err(e) = runtime.load_file(&config_file) {
+                return string_to_c_char_ptr(format!(
+                    r#"{{"error": "Failed to load config file: {}"}}"#,
+                    e
+                ));
+            }
+        }
+
+        // Store runtime globally
+        LUA_RUNTIME.set(runtime).ok();
+
+        // Return success JSON object (not "null" string)
+        string_to_c_char_ptr(r#"{"success": true}"#.to_string())
+    }));
+
+    match result {
+        Ok(ptr) => ptr,
+        Err(_) => string_to_c_char_ptr(r#"{"error": "panic in pigeon_load_config"}"#.to_string()),
+    }
+}
+
+/// Reload the configuration file.
+///
+/// # Safety
+/// - Returns a JSON string: `{"success": true}` on success or
+///   `{"error": "...message..."}` on failure.
+/// - Returned pointer must be freed by calling `pigeon_free_string`.
+#[no_mangle]
+pub unsafe extern "C" fn pigeon_reload_config() -> *mut c_char {
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let runtime = match LUA_RUNTIME.get() {
+            Some(rt) => rt,
+            None => {
+                return string_to_c_char_ptr(
+                    r#"{"error": "Lua runtime not initialized"}"#.to_string(),
+                );
+            }
+        };
+
+        let config_dir = runtime.config_dir();
+        let mut config_file = config_dir.to_path_buf();
+        config_file.push("config.lua");
+
+        if !config_file.exists() {
+            return string_to_c_char_ptr(r#"{"error": "config file not found"}"#.to_string());
+        }
+
+        if let Err(e) = runtime.load_file(&config_file) {
+            return string_to_c_char_ptr(format!(
+                r#"{{"error": "Failed to reload config: {}"}}"#,
+                e
+            ));
+        }
+
+        // Return success JSON object (not "null" string)
+        string_to_c_char_ptr(r#"{"success": true}"#.to_string())
+    }));
+
+    match result {
+        Ok(ptr) => ptr,
+        Err(e) => {
+            let error_msg = format!(r#"{{"error": "panic in pigeon_reload_config: {:?}"}}"#, e);
+            string_to_c_char_ptr(error_msg)
+        }
     }
 }
