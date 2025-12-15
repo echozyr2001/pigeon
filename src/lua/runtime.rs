@@ -3,6 +3,8 @@ use mlua::{Lua, LuaOptions, StdLib};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use super::{config, plugin};
+
 /// Lua runtime wrapper that manages the shared Lua state and provides safe execution.
 pub struct LuaRuntime {
     lua: Arc<Mutex<Lua>>,
@@ -59,6 +61,9 @@ impl LuaRuntime {
         let globals = lua.globals();
 
         let config_table = lua.create_table()?;
+
+        config::setup(&lua, &config_table)?;
+        plugin::setup(&lua, &config_table)?;
 
         globals.set("pigeon", config_table)?;
 
