@@ -1,6 +1,9 @@
 import type { FfiRequest, FfiResponse } from "@/types";
 import { loadRustLib, readCStringAndFree } from "./bindings";
 
+// `self` is the worker global in this module context.
+declare const self: any;
+
 type SendMessage = { type: "send"; id: number; request: FfiRequest };
 
 type ResultMessage =

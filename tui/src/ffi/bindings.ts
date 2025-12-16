@@ -1,42 +1,27 @@
-import { dlopen, FFIType, CString, suffix } from "bun:ffi";
-import { fileURLToPath } from "url";
+import { CString, type Pointer } from "bun:ffi";
+import { getCoreLib } from "./core";
 
 export type RustLib = {
-  sendRequestPtr: (reqJsonPtr: Buffer) => number;
-  freeString: (ptr: number) => void;
+  sendRequestPtr: (reqJsonPtr: Buffer) => Pointer | null;
+  freeString: (ptr: Pointer) => void;
 };
 
 export function loadRustLib(): RustLib {
-  const libPath = fileURLToPath(
-    new URL(`../../../target/release/libpigeon.${suffix}`, import.meta.url)
-  );
-
-  const lib = dlopen(libPath, {
-    pigeon_send_request: {
-      args: [FFIType.cstring],
-      returns: FFIType.ptr,
-    },
-    pigeon_free_string: {
-      args: [FFIType.ptr],
-      returns: FFIType.void,
-    },
-  });
+  const core = getCoreLib();
 
   return {
     sendRequestPtr: (reqJsonBuf: Buffer) => {
-      const ptr = lib.symbols.pigeon_send_request(reqJsonBuf);
-      // Bun returns null for 0 pointers
-      return (ptr as unknown as number) ?? 0;
+      return core.pigeon_send_request(reqJsonBuf);
     },
-    freeString: (ptr: number) => {
-      lib.symbols.pigeon_free_string(ptr);
+    freeString: (ptr: Pointer) => {
+      core.pigeon_free_string(ptr);
     },
   };
 }
 
 export function readCStringAndFree(
-  ptr: number,
-  free: (p: number) => void
+  ptr: Pointer | null,
+  free: (p: Pointer) => void
 ): string {
   if (!ptr) return "";
   const s = new CString(ptr);
