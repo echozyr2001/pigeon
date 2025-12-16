@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Box, Text, useApp, useInput, useStdin } from "ink";
-import { Select, Spinner, StatusMessage, TextInput } from "@inkjs/ui";
+import { Spinner, StatusMessage, TextInput } from "@inkjs/ui";
 import { useMachine } from "@xstate/react";
 import type { FfiRequest, HttpMethod, RequestHeader } from "@/types";
 import { sendRequestViaRust } from "@/ffi/client";
@@ -10,6 +10,7 @@ import { TabBar } from "@/ui/TabBar";
 import { KeyHints } from "@/ui/KeyHints";
 import { TextArea } from "@/ui/TextArea";
 import { DebugPanel } from "@/ui/DebugPanel";
+import { MethodDropdown, MethodDropdownMenu } from "@/ui/MethodDropdown";
 import { theme } from "@/ui/theme";
 import {
   focusMachine,
@@ -227,6 +228,8 @@ export function App() {
 
   const [method, setMethod] = useState<HttpMethod>("GET");
   const [url, setUrl] = useState<string>("https://httpbin.org/get");
+  const [methodDropdownOpen, setMethodDropdownOpen] = useState(false);
+  const [methodHighlightedIndex, setMethodHighlightedIndex] = useState(0);
 
   const [headerKey, setHeaderKey] = useState<string>("");
   const [headerValue, setHeaderValue] = useState<string>("");
@@ -404,13 +407,14 @@ export function App() {
     >
       <Box flexDirection="column" width={10}>
         <Text dimColor>Method</Text>
-        <Select
-          isDisabled={
-            focus !== "topbar" || topbarField !== "method" || isLoading
-          }
+        <MethodDropdown
+          value={method}
           options={methodOptions}
-          defaultValue={method}
-          onChange={(value) => setMethod(value as HttpMethod)}
+          isActive={focus === "topbar" && topbarField === "method"}
+          isDisabled={isLoading}
+          onChange={(value) => setMethod(value)}
+          onOpenChange={setMethodDropdownOpen}
+          onHighlightChange={setMethodHighlightedIndex}
         />
       </Box>
 
@@ -665,7 +669,7 @@ export function App() {
   );
 
   return (
-    <Box flexDirection="column" padding={1} width="100%">
+    <Box flexDirection="column" padding={1} width="100%" position="relative">
       <KeyboardShortcuts
         onExit={quit}
         onSend={() => {
@@ -711,7 +715,7 @@ export function App() {
 
       {error ? <StatusMessage variant="error">{error}</StatusMessage> : null}
 
-      <Box flexDirection="column" gap={1} width="100%">
+      <Box flexDirection="column" gap={1} width="100%" position="relative">
         {TopBar}
 
         <HSplit left={Sidebar} right={RightPane} leftWidth={32} gap={1} />
@@ -734,6 +738,21 @@ export function App() {
           />
         </Box>
       </Box>
+
+      {/* Method dropdown overlay - rendered at app level to ensure proper layering */}
+      {/* Positioned absolutely to float above all content */}
+      {/* Rendered last to ensure it appears on top */}
+      {methodDropdownOpen && focus === "topbar" && topbarField === "method" && (
+        <MethodDropdownMenu
+          isOpen={methodDropdownOpen}
+          value={method}
+          options={methodOptions}
+          highlightedIndex={methodHighlightedIndex}
+          onSelect={(value) => setMethod(value)}
+          top={4} // Position below the topbar (1 padding + 1 title + 1 topbar + 1 gap)
+          left={3} // Align with Method selector (1 padding + 1 border + 1 for alignment)
+        />
+      )}
     </Box>
   );
 }

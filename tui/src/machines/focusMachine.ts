@@ -49,6 +49,21 @@ const baseFocusMachine = createMachine({
     responseTab: "body" as ResponseTab,
   },
 
+  on: {
+    FOCUS_METHOD: {
+      target: ".topbar",
+      actions: assign({
+        currentField: "method" as TopbarField,
+      }),
+    },
+    FOCUS_URL: {
+      target: ".topbar",
+      actions: assign({
+        currentField: "url" as TopbarField,
+      }),
+    },
+  },
+
   states: {
     topbar: {
       on: {
