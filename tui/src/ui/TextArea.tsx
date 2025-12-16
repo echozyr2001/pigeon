@@ -94,7 +94,9 @@ export function TextArea(props: {
     [draft, props.value, isEditing]
   );
 
-  const viewportHeight = Math.max(1, props.height - 2);
+  // Viewport is the inner content height:
+  // total height - top border - bottom border - header - footer
+  const viewportHeight = Math.max(1, props.height - 4);
 
   const ensureCursorVisible = (nextCursor: number, nextDraft: string) => {
     const { line } = indexToLineCol(nextDraft, nextCursor);

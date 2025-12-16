@@ -39,11 +39,13 @@ function KeyboardShortcuts(props: {
   onFocusUrl?: () => void;
   onToggleDebug?: () => void;
   onClearDebugLogs?: () => void;
-  canQuit?: () => boolean;
+  canHandleGlobalShortcut?: () => boolean;
 }) {
   useInput((input, key) => {
+    const canHandleGlobal = props.canHandleGlobalShortcut?.() ?? true;
+
     // Avoid quitting while the user is typing (e.g. URL contains 'q').
-    if (input === "q" && (props.canQuit?.() ?? true)) {
+    if (input === "q" && canHandleGlobal) {
       props.onExit();
       return;
     }
@@ -93,8 +95,8 @@ function KeyboardShortcuts(props: {
       props.onFocusUrl?.();
     }
 
-    // Toggle debug panel
-    if (input === "d" && !key.ctrl) {
+    // Toggle debug panel (only when not actively typing)
+    if (input === "d" && !key.ctrl && canHandleGlobal) {
       props.onToggleDebug?.();
     }
 
@@ -211,7 +213,7 @@ export function App() {
     ? currentField
     : "headerKey";
 
-  const canQuit = () => {
+  const canHandleGlobalShortcut = () => {
     // If you're currently editing/typing in a field, `q` should be treated as input.
     if (focus === "topbar") return false;
     if (
@@ -699,7 +701,7 @@ export function App() {
         }}
         onToggleDebug={toggleDebugPanel}
         onClearDebugLogs={clearLogs}
-        canQuit={canQuit}
+        canHandleGlobalShortcut={canHandleGlobalShortcut}
       />
 
       <Box justifyContent="space-between" marginBottom={1}>
