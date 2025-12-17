@@ -1,6 +1,12 @@
 // VimProvider React Context component
 
-import React, { createContext, useContext, useState, useMemo } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useMemo,
+  useCallback,
+} from "react";
 import { useMachine } from "@xstate/react";
 import { vimModeMachine } from "../machines/index.js";
 import { PanelRegistry } from "../registry/index.js";
@@ -26,45 +32,86 @@ export function VimProvider({ children }: { children: React.ReactNode }) {
   // Track active panel ID
   const [activePanelId, setActivePanelId] = useState<string | null>(null);
 
-  // Initialize InputDispatcher with dependencies
+  // Memoize callback functions to prevent unnecessary re-renders
+  const getCurrentMode = useCallback(
+    (): VimMode => state.value as VimMode,
+    [state.value]
+  );
+  const getActivePanelId = useCallback(() => activePanelId, [activePanelId]);
+  const getCommandBuffer = useCallback(
+    () => state.context.commandBuffer,
+    [state.context.commandBuffer]
+  );
+  const getPanelRegistry = useCallback(() => panelRegistry, [panelRegistry]);
+  const sendModeEvent = useCallback(
+    (event: VimModeEvent) => send(event),
+    [send]
+  );
+  const focusPanel = useCallback((panelId: string) => {
+    setActivePanelId(panelId);
+  }, []);
+
+  // Initialize InputDispatcher with memoized dependencies
   const inputDispatcher = useMemo(() => {
     const dependencies = {
-      getCurrentMode: (): VimMode => state.value as VimMode,
-      getActivePanelId: () => activePanelId,
-      getCommandBuffer: () => state.context.commandBuffer,
-      getPanelRegistry: () => panelRegistry,
-      sendModeEvent: (event: VimModeEvent) => send(event),
-      focusPanel: (panelId: string) => {
-        setActivePanelId(panelId);
-      },
+      getCurrentMode,
+      getActivePanelId,
+      getCommandBuffer,
+      getPanelRegistry,
+      sendModeEvent,
+      focusPanel,
     };
 
     return new InputDispatcher(dependencies);
   }, [
-    state.value,
-    state.context.commandBuffer,
-    activePanelId,
-    panelRegistry,
-    send,
+    getCurrentMode,
+    getActivePanelId,
+    getCommandBuffer,
+    getPanelRegistry,
+    sendModeEvent,
+    focusPanel,
   ]);
 
-  // Create context value
-  const contextValue: VimContextState = {
-    mode: state.value as VimMode,
-    activePanelId,
-    commandBuffer: state.context.commandBuffer,
-    panelRegistry,
-    statusMessage: state.context.statusMessage,
-    commandInput: state.context.commandInput,
-  };
+  // Cleanup on unmount
+  React.useEffect(() => {
+    return () => {
+      // Clean up panel registry
+      panelRegistry.clear();
+      // Clean up input dispatcher
+      inputDispatcher.destroy();
+    };
+  }, [panelRegistry, inputDispatcher]);
 
-  // Expose additional methods for hooks
-  const extendedContextValue: VimContextExtended = {
-    ...contextValue,
-    send,
-    inputDispatcher,
-    setActivePanelId,
-  };
+  // Memoize context values to prevent unnecessary re-renders
+  const contextValue: VimContextState = useMemo(
+    () => ({
+      mode: state.value as VimMode,
+      activePanelId,
+      commandBuffer: state.context.commandBuffer,
+      panelRegistry,
+      statusMessage: state.context.statusMessage,
+      commandInput: state.context.commandInput,
+    }),
+    [
+      state.value,
+      activePanelId,
+      state.context.commandBuffer,
+      panelRegistry,
+      state.context.statusMessage,
+      state.context.commandInput,
+    ]
+  );
+
+  // Memoize extended context value
+  const extendedContextValue: VimContextExtended = useMemo(
+    () => ({
+      ...contextValue,
+      send,
+      inputDispatcher,
+      setActivePanelId,
+    }),
+    [contextValue, send, inputDispatcher, setActivePanelId]
+  );
 
   return (
     <VimContext.Provider value={extendedContextValue}>

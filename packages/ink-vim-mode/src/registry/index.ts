@@ -190,4 +190,12 @@ export class PanelRegistry {
   hasPanel(id: string): boolean {
     return this.panels.has(id);
   }
+
+  /**
+   * Clear all registered panels (for cleanup)
+   */
+  clear(): void {
+    this.panels.clear();
+    this.spatialGraph.clear();
+  }
 }

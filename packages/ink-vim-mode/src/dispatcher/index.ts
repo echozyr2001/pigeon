@@ -22,9 +22,18 @@ export class InputDispatcher {
   private dependencies: InputDispatcherDependencies;
   private componentHandlers: Map<string, (command: VimCommand) => void> =
     new Map();
+  private isDestroyed = false;
 
   constructor(dependencies: InputDispatcherDependencies) {
     this.dependencies = dependencies;
+  }
+
+  /**
+   * Clean up resources and prevent memory leaks
+   */
+  destroy(): void {
+    this.isDestroyed = true;
+    this.componentHandlers.clear();
   }
 
   /**
@@ -34,6 +43,12 @@ export class InputDispatcher {
     panelId: string,
     handler: (command: VimCommand) => void
   ): void {
+    if (this.isDestroyed) {
+      console.warn(
+        "Attempted to register handler on destroyed InputDispatcher"
+      );
+      return;
+    }
     this.componentHandlers.set(panelId, handler);
   }
 
@@ -41,6 +56,9 @@ export class InputDispatcher {
    * Unregister a component-level input handler
    */
   unregisterComponentHandler(panelId: string): void {
+    if (this.isDestroyed) {
+      return;
+    }
     this.componentHandlers.delete(panelId);
   }
 
@@ -49,6 +67,10 @@ export class InputDispatcher {
    * Returns true if input was handled, false if it should be passed through
    */
   process(input: string, key: any): boolean {
+    if (this.isDestroyed) {
+      return false;
+    }
+
     // Tier 1: Global handlers (highest priority)
     // Handle Ctrl+hjkl for spatial navigation
     if (this.handleGlobalInput(input, key)) {
