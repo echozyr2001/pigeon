@@ -1,28 +1,68 @@
 // React hooks for ink-vim-mode library
 
-import type { SpatialRelationships, VimCommand } from "../types";
+import { useEffect } from "react";
+import { useVimContext } from "../context/VimProvider.js";
+import type {
+  SpatialRelationships,
+  VimCommand,
+  VimModeHook,
+  VimNavigationHook,
+  VimInputHook,
+} from "../types";
 
-export function useVimMode() {
-  // TODO: Implement useVimMode hook
-  throw new Error("useVimMode not yet implemented");
-}
+export function useVimMode(): VimModeHook {
+  const context = useVimContext();
 
-export function useVimNavigation() {
-  // TODO: Implement useVimNavigation hook
   return {
-    register: (id: string, relationships: SpatialRelationships) => {
-      throw new Error("useVimNavigation not yet implemented");
-    },
-    unregister: (id: string) => {
-      throw new Error("useVimNavigation not yet implemented");
-    },
-    focus: (panelId: string) => {
-      throw new Error("useVimNavigation not yet implemented");
-    },
+    mode: context.mode,
+    send: context.send,
+    commandBuffer: context.commandBuffer,
+    statusMessage: context.statusMessage,
   };
 }
 
-export function useVimInput(handler: (command: VimCommand) => void) {
-  // TODO: Implement useVimInput hook
-  throw new Error("useVimInput not yet implemented");
+export function useVimNavigation(): VimNavigationHook {
+  const context = useVimContext();
+
+  const register = (id: string, relationships: SpatialRelationships) => {
+    context.panelRegistry.register(id, relationships);
+  };
+
+  const unregister = (id: string) => {
+    context.panelRegistry.unregister(id);
+  };
+
+  const focus = (panelId: string) => {
+    context.setActivePanelId(panelId);
+  };
+
+  return {
+    register,
+    unregister,
+    focus,
+  };
+}
+
+export function useVimInput(
+  handler: (command: VimCommand) => void
+): VimInputHook {
+  const context = useVimContext();
+
+  // Register the component handler with the input dispatcher
+  useEffect(() => {
+    const panelId = context.activePanelId;
+    if (panelId) {
+      context.inputDispatcher.registerComponentHandler(panelId, handler);
+
+      // Cleanup on unmount or when panelId changes
+      return () => {
+        context.inputDispatcher.unregisterComponentHandler(panelId);
+      };
+    }
+  }, [context.activePanelId, context.inputDispatcher, handler]);
+
+  return {
+    isActive: context.activePanelId !== null,
+    mode: context.mode,
+  };
 }
