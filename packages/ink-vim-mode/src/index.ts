@@ -12,6 +12,9 @@ export { StatusLine } from "./components/StatusLine";
 // Registry
 export { PanelRegistry } from "./registry";
 
+// Input Dispatcher
+export { InputDispatcher } from "./dispatcher";
+
 // TypeScript types
 export type {
   VimMode,
@@ -26,6 +29,7 @@ export type {
   VimModeContext,
   VimModeEvent,
   InputDispatcherConfig,
+  InputDispatcherDependencies,
   VimNavigationHook,
   VimModeHook,
   VimInputHook,

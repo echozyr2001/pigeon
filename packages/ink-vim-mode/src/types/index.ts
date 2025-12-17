@@ -72,6 +72,15 @@ export interface InputDispatcherConfig {
   componentHandlers: Map<string, (command: VimCommand) => void>;
 }
 
+export interface InputDispatcherDependencies {
+  getCurrentMode: () => VimMode;
+  getActivePanelId: () => string | null;
+  getCommandBuffer: () => string;
+  getPanelRegistry: () => PanelRegistry;
+  sendModeEvent: (event: any) => void;
+  focusPanel: (panelId: string) => void;
+}
+
 // Panel Registry Interface
 export interface PanelRegistry {
   register(id: string, relationships: SpatialRelationships): void;
