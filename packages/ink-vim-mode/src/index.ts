@@ -9,6 +9,9 @@ export { useVimMode, useVimNavigation, useVimInput } from "./hooks";
 // Components
 export { StatusLine } from "./components/StatusLine";
 
+// Registry
+export { PanelRegistry } from "./registry";
+
 // TypeScript types
 export type {
   VimMode,
@@ -19,4 +22,11 @@ export type {
   MotionCommand,
   NavigationCommand,
   StatusLineState,
+  Direction,
+  VimModeContext,
+  VimModeEvent,
+  InputDispatcherConfig,
+  VimNavigationHook,
+  VimModeHook,
+  VimInputHook,
 } from "./types";
