@@ -18,6 +18,7 @@ export function useVimMode(): VimModeHook {
     send: context.send,
     commandBuffer: context.commandBuffer,
     statusMessage: context.statusMessage,
+    commandInput: context.commandInput,
   };
 }
 

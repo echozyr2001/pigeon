@@ -55,6 +55,7 @@ export function VimProvider({ children }: { children: React.ReactNode }) {
     commandBuffer: state.context.commandBuffer,
     panelRegistry,
     statusMessage: state.context.statusMessage,
+    commandInput: state.context.commandInput,
   };
 
   // Expose additional methods for hooks

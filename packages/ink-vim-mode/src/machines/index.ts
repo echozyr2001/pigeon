@@ -14,6 +14,7 @@ export const vimModeMachine = createMachine({
     commandBuffer: "",
     count: 0,
     statusMessage: null,
+    commandInput: "",
   },
   states: {
     NORMAL: {
@@ -65,6 +66,7 @@ export const vimModeMachine = createMachine({
             commandBuffer: "",
             count: 0,
             statusMessage: null,
+            commandInput: "",
           }),
         },
       },
@@ -78,6 +80,7 @@ export const vimModeMachine = createMachine({
             commandBuffer: "",
             count: 0,
             statusMessage: null,
+            commandInput: "",
           }),
         },
       },
@@ -91,6 +94,7 @@ export const vimModeMachine = createMachine({
             commandBuffer: "",
             count: 0,
             statusMessage: null,
+            commandInput: "",
           }),
         },
         ENTER_INSERT: {
@@ -116,6 +120,7 @@ export const vimModeMachine = createMachine({
             commandBuffer: "",
             count: 0,
             statusMessage: null,
+            commandInput: "",
           }),
         },
         EXECUTE_COMMAND: {
@@ -125,6 +130,12 @@ export const vimModeMachine = createMachine({
             commandBuffer: "",
             count: 0,
             statusMessage: ({ event }) => `Executed: ${event.command}`,
+            commandInput: "",
+          }),
+        },
+        UPDATE_COMMAND_INPUT: {
+          actions: assign({
+            commandInput: ({ event }) => event.input,
           }),
         },
       },

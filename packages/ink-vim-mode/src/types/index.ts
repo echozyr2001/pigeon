@@ -11,6 +11,7 @@ export interface VimContextState {
   commandBuffer: string;
   panelRegistry: PanelRegistry;
   statusMessage: string | null;
+  commandInput: string;
 }
 
 // Forward declaration for InputDispatcher (to avoid circular imports)
@@ -70,6 +71,7 @@ export interface VimModeContext {
   commandBuffer: string;
   count: number;
   statusMessage: string | null;
+  commandInput: string; // For COMMAND mode text input
 }
 
 export type VimModeEvent =
@@ -80,7 +82,8 @@ export type VimModeEvent =
   | { type: "APPEND_BUFFER"; char: string }
   | { type: "CLEAR_BUFFER" }
   | { type: "EXECUTE_COMMAND"; command: string }
-  | { type: "FOCUS_PANEL"; panelId: string };
+  | { type: "FOCUS_PANEL"; panelId: string }
+  | { type: "UPDATE_COMMAND_INPUT"; input: string };
 
 // Input Dispatcher Types
 export interface InputDispatcherConfig {
@@ -127,6 +130,7 @@ export interface VimModeHook {
   send: (event: VimModeEvent) => void;
   commandBuffer: string;
   statusMessage: string | null;
+  commandInput: string;
 }
 
 export interface VimInputHook {
