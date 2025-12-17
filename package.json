@@ -1,0 +1,28 @@
+{
+  "name": "pigeon-workspace",
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "tui"
+  ],
+  "scripts": {
+    "build:lib": "bun run --filter='ink-vim-mode' build",
+    "test:lib": "bun run --filter='ink-vim-mode' test",
+    "dev:tui": "bun run --filter='pigeon-tui' dev",
+    "build:rust": "cargo build --release --lib"
+  },
+  "devDependencies": {
+    "bun": "latest",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "workspace",
+    "tui",
+    "vim",
+    "http",
+    "client",
+    "terminal"
+  ],
+  "author": "echozyr2001 <echo.zyr.2001@gmail.com>",
+  "license": "MIT"
+}
