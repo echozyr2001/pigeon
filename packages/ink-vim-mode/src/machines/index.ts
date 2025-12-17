@@ -1,6 +1,7 @@
 // XState machines for Vim mode management
 import { createMachine, assign } from "xstate";
-import type { VimModeContext, VimModeEvent, VimMode } from "../types/index.js";
+import type { VimModeContext, VimModeEvent, VimMode } from "../types/index";
+import { defaultCommandExecutor } from "../commands/index";
 
 export const vimModeMachine = createMachine({
   id: "vimMode",
@@ -123,16 +124,35 @@ export const vimModeMachine = createMachine({
             commandInput: "",
           }),
         },
-        EXECUTE_COMMAND: {
-          target: "NORMAL",
-          actions: assign({
-            previousMode: "COMMAND",
-            commandBuffer: "",
-            count: 0,
-            statusMessage: ({ event }) => `Executed: ${event.command}`,
-            commandInput: "",
-          }),
-        },
+        EXECUTE_COMMAND: [
+          {
+            target: "NORMAL",
+            guard: ({ event }) => {
+              const result = defaultCommandExecutor.execute(event.command);
+              return result.success;
+            },
+            actions: assign({
+              previousMode: "COMMAND",
+              commandBuffer: "",
+              count: 0,
+              statusMessage: ({ event }) => {
+                const result = defaultCommandExecutor.execute(event.command);
+                return result.message || `Executed: ${event.command}`;
+              },
+              commandInput: "",
+            }),
+          },
+          {
+            // Stay in COMMAND mode on error
+            actions: assign({
+              statusMessage: ({ event }) => {
+                const result = defaultCommandExecutor.execute(event.command);
+                return result.error || `Failed to execute: ${event.command}`;
+              },
+              commandInput: "",
+            }),
+          },
+        ],
         UPDATE_COMMAND_INPUT: {
           actions: assign({
             commandInput: ({ event }) => event.input,

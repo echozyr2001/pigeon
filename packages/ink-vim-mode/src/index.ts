@@ -15,6 +15,9 @@ export { PanelRegistry } from "./registry";
 // Input Dispatcher
 export { InputDispatcher } from "./dispatcher";
 
+// Command System
+export { VimCommandExecutor, defaultCommandExecutor } from "./commands";
+
 // TypeScript types
 export type {
   VimMode,
@@ -33,4 +36,6 @@ export type {
   VimNavigationHook,
   VimModeHook,
   VimInputHook,
+  CommandResult,
+  CommandExecutor,
 } from "./types";

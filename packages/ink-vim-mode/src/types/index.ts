@@ -137,3 +137,20 @@ export interface VimInputHook {
   isActive: boolean;
   mode: VimMode;
 }
+
+// Command System Types
+export interface CommandResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
+export interface CommandExecutor {
+  execute(command: string): CommandResult;
+  registerCommand(
+    name: string,
+    handler: (args: string[]) => CommandResult
+  ): void;
+  unregisterCommand(name: string): void;
+  getAvailableCommands(): string[];
+}
