@@ -29,12 +29,10 @@ export class PanelRegistry {
     this.panels.set(id, registration);
     this.spatialGraph.set(id, relationships);
 
-    // Validate relationships form a connected graph
-    if (!this.validateConnectivity()) {
-      console.warn(
-        `Panel registration for "${id}" may have created disconnected graph segments.`
-      );
-    }
+    // Note: We don't validate connectivity during registration because
+    // React components mount asynchronously and panels may be registered
+    // in different orders, causing temporary disconnected states that
+    // resolve once all components are mounted.
   }
 
   /**
