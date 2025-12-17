@@ -1,7 +1,7 @@
 // Main library exports for ink-vim-mode
 
 // Context and Provider
-export { VimProvider } from "./context/VimProvider";
+export { VimProvider, useVimContext } from "./context/VimProvider";
 
 // React hooks
 export { useVimMode, useVimNavigation, useVimInput } from "./hooks";

@@ -13,6 +13,23 @@ export interface VimContextState {
   statusMessage: string | null;
 }
 
+// Forward declaration for InputDispatcher (to avoid circular imports)
+export interface InputDispatcherInterface {
+  registerComponentHandler(
+    panelId: string,
+    handler: (command: VimCommand) => void
+  ): void;
+  unregisterComponentHandler(panelId: string): void;
+  process(input: string, key: any): boolean;
+}
+
+// Extended context interface for internal use (includes methods for hooks)
+export interface VimContextExtended extends VimContextState {
+  send: (event: VimModeEvent) => void;
+  inputDispatcher: InputDispatcherInterface;
+  setActivePanelId: (panelId: string | null) => void;
+}
+
 // Panel Registration Types
 export interface PanelRegistration {
   id: string;
