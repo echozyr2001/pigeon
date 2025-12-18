@@ -4,7 +4,18 @@
 export { VimProvider, useVimContext } from "./context/VimProvider";
 
 // React hooks
-export { useVimMode, useVimNavigation, useVimInput } from "./hooks";
+export {
+  useVimMode,
+  useVimNavigation,
+  useVimInput,
+  useVimCommand,
+  useVimMotion,
+  useStandardVimNavigation,
+  useVimUnhandledInput,
+  useVimModeAwareInput,
+  useVimEditor,
+  useVimEditorCommands,
+} from "./hooks";
 
 // Components
 export { StatusLine } from "./components/StatusLine";
@@ -32,10 +43,10 @@ export type {
   VimModeContext,
   VimModeEvent,
   InputDispatcherConfig,
-  InputDispatcherDependencies,
   VimNavigationHook,
   VimModeHook,
   VimInputHook,
   CommandResult,
   CommandExecutor,
+  EditorOperations,
 } from "./types";

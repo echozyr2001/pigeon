@@ -51,30 +51,14 @@ export class PanelRegistry {
       const updated: SpatialRelationships = {};
       let hasChanges = false;
 
-      // Remove references to the unregistered panel
-      if (relationships.left && relationships.left !== id) {
-        updated.left = relationships.left;
-      } else if (relationships.left === id) {
-        hasChanges = true;
-      }
-
-      if (relationships.right && relationships.right !== id) {
-        updated.right = relationships.right;
-      } else if (relationships.right === id) {
-        hasChanges = true;
-      }
-
-      if (relationships.up && relationships.up !== id) {
-        updated.up = relationships.up;
-      } else if (relationships.up === id) {
-        hasChanges = true;
-      }
-
-      if (relationships.down && relationships.down !== id) {
-        updated.down = relationships.down;
-      } else if (relationships.down === id) {
-        hasChanges = true;
-      }
+      // Check each direction and remove references to the unregistered panel
+      (["left", "right", "up", "down"] as const).forEach((dir) => {
+        if (relationships[dir] === id) {
+          hasChanges = true;
+        } else if (relationships[dir]) {
+          updated[dir] = relationships[dir];
+        }
+      });
 
       if (hasChanges) {
         this.spatialGraph.set(panelId, updated);

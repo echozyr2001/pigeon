@@ -1,20 +1,6 @@
 // Command execution system for Vim mode
 
-export interface CommandResult {
-  success: boolean;
-  message?: string;
-  error?: string;
-}
-
-export interface CommandExecutor {
-  execute(command: string): CommandResult;
-  registerCommand(
-    name: string,
-    handler: (args: string[]) => CommandResult
-  ): void;
-  unregisterCommand(name: string): void;
-  getAvailableCommands(): string[];
-}
+import type { CommandResult, CommandExecutor } from "../types";
 
 export class VimCommandExecutor implements CommandExecutor {
   private commands: Map<string, (args: string[]) => CommandResult> = new Map();

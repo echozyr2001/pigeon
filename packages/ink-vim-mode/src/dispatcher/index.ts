@@ -5,24 +5,26 @@ import type {
   VimMode,
   Direction,
   MotionCommand,
-  NavigationCommand,
   PanelRegistry,
 } from "../types";
+import { parseKeyToCommand } from "./parser";
 
 export interface InputDispatcherDependencies {
   getCurrentMode: () => VimMode;
   getActivePanelId: () => string | null;
   getCommandBuffer: () => string;
   getPanelRegistry: () => PanelRegistry;
+  getCount: () => number;
   sendModeEvent: (event: any) => void;
   focusPanel: (panelId: string) => void;
 }
 
 export class InputDispatcher {
   private dependencies: InputDispatcherDependencies;
-  private componentHandlers: Map<string, (command: VimCommand) => void> =
+  private componentHandlers: Map<string, Set<(command: VimCommand) => void>> =
     new Map();
   private isDestroyed = false;
+  private pendingOperator: string | null = null;
 
   constructor(dependencies: InputDispatcherDependencies) {
     this.dependencies = dependencies;
@@ -49,7 +51,12 @@ export class InputDispatcher {
       );
       return;
     }
-    this.componentHandlers.set(panelId, handler);
+    const existing = this.componentHandlers.get(panelId);
+    if (existing) {
+      existing.add(handler);
+    } else {
+      this.componentHandlers.set(panelId, new Set([handler]));
+    }
   }
 
   /**
@@ -59,6 +66,11 @@ export class InputDispatcher {
     if (this.isDestroyed) {
       return;
     }
+    const existing = this.componentHandlers.get(panelId);
+    if (!existing) {
+      return;
+    }
+    existing.clear();
     this.componentHandlers.delete(panelId);
   }
 
@@ -70,6 +82,8 @@ export class InputDispatcher {
     if (this.isDestroyed) {
       return false;
     }
+
+    const currentMode = this.dependencies.getCurrentMode();
 
     // Tier 1: Global handlers (highest priority)
     // Handle Ctrl+hjkl for spatial navigation
@@ -83,8 +97,12 @@ export class InputDispatcher {
     }
 
     // Tier 3: Component-level handlers
-    if (this.handleComponentInput(input, key)) {
-      return true;
+    // Skip component-level handlers in INSERT mode - all input should be passed through
+    // as text input (except Escape which is handled in Tier 2)
+    if (currentMode !== "INSERT") {
+      if (this.handleComponentInput(input, key)) {
+        return true;
+      }
     }
 
     // If no handler processed the input, it should be passed through
@@ -131,20 +149,42 @@ export class InputDispatcher {
    * Tier 3: Handle component-level input
    */
   private handleComponentInput(input: string, key: any): boolean {
+    const currentMode = this.dependencies.getCurrentMode();
+
+    // Skip component-level handlers in INSERT and COMMAND modes
+    // In INSERT mode, all input should be passed through as text
+    // In COMMAND mode, input is handled by StatusLine component
+    if (currentMode === "INSERT" || currentMode === "COMMAND") {
+      return false;
+    }
+
     const activePanelId = this.dependencies.getActivePanelId();
     if (!activePanelId) {
       return false;
     }
 
-    const handler = this.componentHandlers.get(activePanelId);
-    if (!handler) {
+    const handlers = this.componentHandlers.get(activePanelId);
+    if (!handlers || handlers.size === 0) {
       return false;
     }
 
-    // Create appropriate command based on input
-    const command = this.createCommandFromInput(input, key);
-    if (command) {
-      handler(command);
+    // Use the pure key -> command parser to turn the current key plus
+    // mode/count/pendingOperator into a high-level VimCommand.
+    const result = parseKeyToCommand(input, currentMode, {
+      count: this.dependencies.getCount(),
+      pendingOperator: this.pendingOperator,
+    });
+
+    this.pendingOperator = result.nextPendingOperator;
+
+    if (result.clearCountBuffer) {
+      this.dependencies.sendModeEvent({ type: "CLEAR_BUFFER" });
+    }
+
+    if (result.command) {
+      for (const handler of handlers) {
+        handler(result.command);
+      }
       return true;
     }
 
@@ -177,18 +217,15 @@ export class InputDispatcher {
       return true;
     }
 
-    // Handle numeric prefixes (digits)
+    // Handle numeric prefixes (digits). We only mutate the state machine's
+    // commandBuffer/count here; translation into concrete VimCommand
+    // objects is delegated to the pure parser.
     if (/^\d$/.test(input)) {
       this.dependencies.sendModeEvent({ type: "APPEND_BUFFER", char: input });
       return true;
     }
 
-    // Handle hjkl navigation within panels (not spatial navigation)
-    const direction = this.getDirectionFromInput(input);
-    if (direction) {
-      return this.handlePanelNavigation(direction);
-    }
-
+    // All other NORMAL mode keys fall through to component-level handling.
     return false;
   }
 
@@ -227,12 +264,8 @@ export class InputDispatcher {
       return true;
     }
 
-    // Handle hjkl navigation within panels
-    const direction = this.getDirectionFromInput(input);
-    if (direction) {
-      return this.handlePanelNavigation(direction);
-    }
-
+    // VISUAL-specific motions are expressed as VimCommand objects through
+    // the parser and handled by component-level handlers.
     return false;
   }
 
@@ -280,40 +313,6 @@ export class InputDispatcher {
   }
 
   /**
-   * Handle navigation within the current panel (hjkl in NORMAL/VISUAL mode)
-   */
-  private handlePanelNavigation(direction: Direction): boolean {
-    const activePanelId = this.dependencies.getActivePanelId();
-    if (!activePanelId) {
-      return false;
-    }
-
-    const handler = this.componentHandlers.get(activePanelId);
-    if (!handler) {
-      return false;
-    }
-
-    const commandBuffer = this.dependencies.getCommandBuffer();
-    const count = commandBuffer ? parseInt(commandBuffer) || 1 : 1;
-
-    const command: MotionCommand = {
-      type: "MOTION",
-      command: direction,
-      direction,
-      count,
-    };
-
-    handler(command);
-
-    // Clear the command buffer after executing the motion
-    if (commandBuffer) {
-      this.dependencies.sendModeEvent({ type: "CLEAR_BUFFER" });
-    }
-
-    return true;
-  }
-
-  /**
    * Convert input character to direction
    */
   private getDirectionFromInput(input: string): Direction | null {
@@ -329,26 +328,5 @@ export class InputDispatcher {
       default:
         return null;
     }
-  }
-
-  /**
-   * Create a VimCommand from input and key
-   */
-  private createCommandFromInput(input: string, key: any): VimCommand | null {
-    const direction = this.getDirectionFromInput(input);
-    if (direction) {
-      const commandBuffer = this.dependencies.getCommandBuffer();
-      const count = commandBuffer ? parseInt(commandBuffer) || 1 : 1;
-
-      return {
-        type: "MOTION",
-        command: direction,
-        direction,
-        count,
-      } as MotionCommand;
-    }
-
-    // Handle other command types as needed
-    return null;
   }
 }

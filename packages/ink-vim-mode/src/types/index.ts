@@ -10,6 +10,7 @@ export interface VimContextState {
   activePanelId: string | null;
   commandBuffer: string;
   panelRegistry: PanelRegistry;
+  count: number;
   statusMessage: string | null;
   commandInput: string;
 }
@@ -92,15 +93,6 @@ export interface InputDispatcherConfig {
   componentHandlers: Map<string, (command: VimCommand) => void>;
 }
 
-export interface InputDispatcherDependencies {
-  getCurrentMode: () => VimMode;
-  getActivePanelId: () => string | null;
-  getCommandBuffer: () => string;
-  getPanelRegistry: () => PanelRegistry;
-  sendModeEvent: (event: any) => void;
-  focusPanel: (panelId: string) => void;
-}
-
 // Panel Registry Interface
 export interface PanelRegistry {
   register(id: string, relationships: SpatialRelationships): void;
@@ -136,6 +128,15 @@ export interface VimModeHook {
 export interface VimInputHook {
   isActive: boolean;
   mode: VimMode;
+}
+
+// Editor operations interface
+export interface EditorOperations {
+  onInsertChar: (char: string) => void;
+  onDeleteChar: () => void;
+  onDeleteLine: () => void;
+  onInsertNewline: () => void;
+  onBackspace: () => void;
 }
 
 // Command System Types

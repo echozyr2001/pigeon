@@ -56,6 +56,7 @@ export function VimProvider({ children }: { children: React.ReactNode }) {
     const dependencies = {
       getCurrentMode,
       getActivePanelId,
+      getCount: () => state.context.count,
       getCommandBuffer,
       getPanelRegistry,
       sendModeEvent,
@@ -87,6 +88,7 @@ export function VimProvider({ children }: { children: React.ReactNode }) {
     () => ({
       mode: state.value as VimMode,
       activePanelId,
+      count: state.context.count,
       commandBuffer: state.context.commandBuffer,
       panelRegistry,
       statusMessage: state.context.statusMessage,
