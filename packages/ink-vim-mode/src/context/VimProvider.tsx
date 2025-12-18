@@ -8,15 +8,15 @@ import React, {
   useCallback,
 } from "react";
 import { useMachine } from "@xstate/react";
-import { vimModeMachine } from "../machines/index.js";
-import { PanelRegistry } from "../registry/index.js";
-import { InputDispatcher } from "../dispatcher/index.js";
+import { vimModeMachine } from "../machines";
+import { PanelRegistry } from "../registry";
+import { InputDispatcher } from "../dispatcher";
 import type {
   VimContextState,
   VimContextExtended,
   VimModeEvent,
   VimMode,
-} from "../types/index.js";
+} from "../types";
 
 // Create the React Context
 const VimContext = createContext<VimContextExtended | null>(null);

@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback, useMemo, useRef } from "react";
 import { useInput } from "ink";
-import { useVimContext } from "../context/VimProvider.js";
+import { useVimContext } from "../context/VimProvider";
 import type {
   SpatialRelationships,
   VimCommand,

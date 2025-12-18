@@ -1,7 +1,7 @@
 // StatusLine component for displaying Vim mode and status
 
 import { Box, Text, useInput } from "ink";
-import { useVimMode } from "../hooks/index.js";
+import { useVimMode } from "../hooks";
 
 export function StatusLine() {
   const { mode, commandBuffer, statusMessage, commandInput, send } =

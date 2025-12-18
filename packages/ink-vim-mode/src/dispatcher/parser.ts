@@ -2,7 +2,7 @@
 // Pure helpers that translate single-key inputs plus current context
 // into high-level VimCommand objects.
 
-import type { VimCommand, VimMode } from "../types/index.js";
+import type { VimCommand, VimMode } from "../types";
 
 export interface ParseContext {
   /**

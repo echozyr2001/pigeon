@@ -1,7 +1,7 @@
 // XState machines for Vim mode management
 import { createMachine, assign } from "xstate";
-import type { VimModeContext, VimModeEvent, VimMode } from "../types/index";
-import { defaultCommandExecutor } from "../commands/index";
+import type { VimModeContext, VimModeEvent, VimMode } from "../types";
+import { defaultCommandExecutor } from "../commands";
 
 export const vimModeMachine = createMachine({
   id: "vimMode",
