@@ -66,6 +66,12 @@ export interface NavigationCommand extends VimCommand {
   targetPanel?: string;
 }
 
+export interface ActionCommand extends VimCommand {
+  type: "ACTION";
+  command: "DELETE_CHAR" | "DELETE_LINE" | "YANK" | "PASTE";
+  count?: number;
+}
+
 // XState Machine Types
 export interface VimModeContext {
   previousMode: VimMode;
@@ -128,6 +134,7 @@ export interface VimModeHook {
 export interface VimInputHook {
   isActive: boolean;
   mode: VimMode;
+  unregister: () => void;  // Added for manual cleanup
 }
 
 // Editor operations interface

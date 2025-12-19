@@ -38,6 +38,7 @@ export type {
   VimContextState,
   MotionCommand,
   NavigationCommand,
+  ActionCommand,
   StatusLineState,
   Direction,
   VimModeContext,
@@ -50,3 +51,9 @@ export type {
   CommandExecutor,
   EditorOperations,
 } from "./types";
+
+// Type guards
+export { isMotionCommand } from "./type-guards";
+
+// Type guard utilities
+export { isNavigationCommand, isActionCommand } from "./type-guards";

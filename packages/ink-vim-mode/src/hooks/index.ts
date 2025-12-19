@@ -14,32 +14,30 @@ import type {
   MotionCommand,
 } from "../types";
 
+// Helper: Type guard for MotionCommand
+function isMotionCommand(command: VimCommand): command is MotionCommand {
+  return command.type === "MOTION" && "direction" in command;
+}
+
 export function useVimMode(): VimModeHook {
   const context = useVimContext();
 
-  // Memoize the return value to prevent unnecessary re-renders
-  return useMemo(
-    () => ({
-      mode: context.mode,
-      send: context.send,
-      commandBuffer: context.commandBuffer,
-      statusMessage: context.statusMessage,
-      commandInput: context.commandInput,
-    }),
-    [
-      context.mode,
-      context.send,
-      context.commandBuffer,
-      context.statusMessage,
-      context.commandInput,
-    ]
-  );
+  // Return context directly - no need for memoization here
+  // Context values are already memoized in VimProvider
+  return {
+    mode: context.mode,
+    send: context.send,
+    commandBuffer: context.commandBuffer,
+    statusMessage: context.statusMessage,
+    commandInput: context.commandInput,
+  };
 }
 
 export function useVimNavigation(): VimNavigationHook {
   const context = useVimContext();
 
-  // Memoize callback functions to prevent unnecessary re-renders
+  // These callbacks are stable because they only depend on the registry
+  // which is created once in VimProvider
   const register = useCallback(
     (id: string, relationships: SpatialRelationships) => {
       context.panelRegistry.register(id, relationships);
@@ -61,7 +59,6 @@ export function useVimNavigation(): VimNavigationHook {
     [context.setActivePanelId]
   );
 
-  // Memoize the return value
   return useMemo(
     () => ({
       register,
@@ -72,81 +69,89 @@ export function useVimNavigation(): VimNavigationHook {
   );
 }
 
+/**
+ * Core hook for handling Vim commands in a component.
+ * Uses ref-based handler storage to avoid re-registration on mode changes.
+ *
+ * @param panelId - Explicit panel ID for registration (prevents race conditions)
+ * @param handler - Command handler function
+ */
 export function useVimInput(
+  panelId: string,
   handler: (command: VimCommand) => void
 ): VimInputHook {
   const context = useVimContext();
 
-  // Memoize the handler to prevent unnecessary effect re-runs
-  const memoizedHandler = useCallback(handler, [handler]);
+  // Store latest handler and mode in refs - updates don't trigger re-registration
+  const handlerRef = useRef(handler);
+  const modeRef = useRef(context.mode);
 
-  // Wrap handler to automatically filter out INSERT and COMMAND modes
-  // Application code should never receive commands in these modes
-  const wrappedHandler = useCallback(
-    (command: VimCommand) => {
-      // Only call handler in NORMAL or VISUAL modes
-      // Framework ensures INSERT and COMMAND modes don't reach here,
-      // but we add this check as a safety measure
-      if (context.mode === "INSERT" || context.mode === "COMMAND") {
-        return;
-      }
-      memoizedHandler(command);
-    },
-    [memoizedHandler, context.mode]
-  );
-
-  // Register the component handler with the input dispatcher
+  // Update refs on every render
   useEffect(() => {
-    const panelId = context.activePanelId;
+    handlerRef.current = handler;
+    modeRef.current = context.mode;
+  }, [handler, context.mode]);
+
+  // Stable wrapper that uses refs
+  const wrappedHandler = useCallback((command: VimCommand) => {
+    // Check mode using ref (latest value without triggering re-registration)
+    if (modeRef.current === "INSERT" || modeRef.current === "COMMAND") {
+      return;
+    }
+    handlerRef.current(command);
+  }, []); // Empty deps - never changes
+
+  // Register handler only once when panelId is available
+  useEffect(() => {
     if (panelId) {
       context.inputDispatcher.registerComponentHandler(panelId, wrappedHandler);
 
-      // Cleanup on unmount or when panelId changes
       return () => {
         context.inputDispatcher.unregisterComponentHandler(panelId);
       };
     }
-  }, [context.activePanelId, context.inputDispatcher, wrappedHandler]);
+  }, [panelId, context.inputDispatcher, wrappedHandler]);
 
-  // Memoize the return value
   return useMemo(
     () => ({
-      isActive: context.activePanelId !== null,
+      isActive: context.activePanelId === panelId,
       mode: context.mode,
+      unregister: () => {
+        if (panelId) {
+          context.inputDispatcher.unregisterComponentHandler(panelId);
+        }
+      },
     }),
-    [context.activePanelId, context.mode]
+    [context.activePanelId, panelId, context.mode, context.inputDispatcher]
   );
 }
 
 /**
  * Low-level command subscription hook.
- *
- * This is the primitive that higher-level helpers (like navigation or
- * editor integrations) should be built on. It subscribes the current
- * panel to the command stream produced by the input layer and lets the
- * component decide which commands to consume.
- *
- * Only commands in NORMAL / VISUAL modes are delivered; INSERT and
- * COMMAND mode input stays with the consuming components.
+ * Only commands in NORMAL/VISUAL modes are delivered.
  */
-export function useVimCommand(handler: (command: VimCommand) => void): void {
+export function useVimCommand(
+  panelId: string,
+  handler: (command: VimCommand) => void
+): void {
   const context = useVimContext();
 
-  const memoizedHandler = useCallback(handler, [handler]);
-
-  const wrappedHandler = useCallback(
-    (command: VimCommand) => {
-      // For safety, we still guard against INSERT / COMMAND delivery
-      if (context.mode === "INSERT" || context.mode === "COMMAND") {
-        return;
-      }
-      memoizedHandler(command);
-    },
-    [memoizedHandler, context.mode]
-  );
+  const handlerRef = useRef(handler);
+  const modeRef = useRef(context.mode);
 
   useEffect(() => {
-    const panelId = context.activePanelId;
+    handlerRef.current = handler;
+    modeRef.current = context.mode;
+  }, [handler, context.mode]);
+
+  const wrappedHandler = useCallback((command: VimCommand) => {
+    if (modeRef.current === "INSERT" || modeRef.current === "COMMAND") {
+      return;
+    }
+    handlerRef.current(command);
+  }, []);
+
+  useEffect(() => {
     if (panelId) {
       context.inputDispatcher.registerComponentHandler(panelId, wrappedHandler);
 
@@ -154,47 +159,42 @@ export function useVimCommand(handler: (command: VimCommand) => void): void {
         context.inputDispatcher.unregisterComponentHandler(panelId);
       };
     }
-  }, [context.activePanelId, context.inputDispatcher, wrappedHandler]);
+  }, [panelId, context.inputDispatcher, wrappedHandler]);
 }
 
 /**
  * Hook for handling Vim motion commands (hjkl navigation).
  * Framework automatically filters to only MOTION commands in NORMAL/VISUAL modes.
- * Application code only needs to handle direction and count, without checking command types.
- *
- * @param handler - Function to handle motion commands. Receives (direction, count).
- *                  Only called for MOTION commands in NORMAL/VISUAL modes.
  */
 export function useVimMotion(
+  panelId: string,
   handler: (direction: Direction, count: number) => void
 ): void {
   const memoizedHandler = useCallback(handler, [handler]);
 
-  // Build on top of the more general useVimCommand primitive.
-  useVimCommand((command: VimCommand) => {
-    if (command.type === "MOTION") {
-      const motionCmd = command as MotionCommand;
-      memoizedHandler(motionCmd.direction, motionCmd.count);
+  useVimCommand(panelId, (command: VimCommand) => {
+    if (isMotionCommand(command)) {
+      memoizedHandler(command.direction, command.count);
     }
   });
 }
 
 /**
  * Standard Vim-style navigation hook.
- *
- * Framework maps MOTION commands (hjkl with optional count) into
- * semantic callbacks. Components decide what \"move left/right/up/down\"
- * means in their own domain (cursor movement, list selection, etc.).
+ * Maps MOTION commands into semantic callbacks.
  */
-export function useStandardVimNavigation(handlers: {
-  onLeft?: (count: number) => void;
-  onRight?: (count: number) => void;
-  onUp?: (count: number) => void;
-  onDown?: (count: number) => void;
-}): void {
+export function useStandardVimNavigation(
+  panelId: string,
+  handlers: {
+    onLeft?: (count: number) => void;
+    onRight?: (count: number) => void;
+    onUp?: (count: number) => void;
+    onDown?: (count: number) => void;
+  }
+): void {
   const { onLeft, onRight, onUp, onDown } = handlers;
 
-  useVimCommand((command: VimCommand) => {
+  useVimCommand(panelId, (command: VimCommand) => {
     if (command.type !== "MOTION") {
       return;
     }
@@ -222,25 +222,16 @@ export function useStandardVimNavigation(handlers: {
 /**
  * Hook for handling input that Vim dispatcher doesn't handle.
  * This is useful for application-specific input handling (e.g., text input in INSERT mode).
- * The library handles all Vim commands internally, and only calls this handler for unhandled input.
- *
- * @param handler - Function to handle unhandled input. Receives (input, key) and should return void.
- *                  The handler is only called when dispatcher returns false (input not handled by Vim).
  */
 export function useVimUnhandledInput(
   handler: (input: string, key: any) => void
 ): void {
   const context = useVimContext();
-
-  // Memoize the handler to prevent unnecessary re-runs
   const memoizedHandler = useCallback(handler, [handler]);
 
-  // Use Ink's useInput to receive all input events
   useInput((input, key) => {
-    // First, let the Vim dispatcher try to handle the input
     const handledByVim = context.inputDispatcher.process(input, key);
 
-    // Only call the application handler if Vim didn't handle it
     if (!handledByVim) {
       memoizedHandler(input, key);
     }
@@ -249,14 +240,7 @@ export function useVimUnhandledInput(
 
 /**
  * Hook for handling input with mode-aware callbacks.
- * The library automatically routes unhandled input to the appropriate callback based on current mode.
- * This eliminates the need for application code to check Vim modes.
- *
- * @param handlers - Object with mode-specific handlers:
- *   - onInsertInput: Called for unhandled input in INSERT mode (text input)
- *   - onNormalInput: Called for unhandled input in NORMAL mode (editor commands)
- *   - onVisualInput: Optional, called for unhandled input in VISUAL mode
- *   - onCommandInput: Optional, called for unhandled input in COMMAND mode
+ * Routes unhandled input to the appropriate callback based on current mode.
  */
 export function useVimModeAwareInput(handlers: {
   onInsertInput: (input: string, key: any) => void;
@@ -266,7 +250,6 @@ export function useVimModeAwareInput(handlers: {
 }): void {
   const context = useVimContext();
 
-  // Memoize handlers to prevent unnecessary re-runs
   const memoizedOnInsert = useCallback(handlers.onInsertInput, [
     handlers.onInsertInput,
   ]);
@@ -280,12 +263,9 @@ export function useVimModeAwareInput(handlers: {
     ? useCallback(handlers.onCommandInput, [handlers.onCommandInput])
     : undefined;
 
-  // Use Ink's useInput to receive all input events
   useInput((input, key) => {
-    // First, let the Vim dispatcher try to handle the input
     const handledByVim = context.inputDispatcher.process(input, key);
 
-    // Only call the application handler if Vim didn't handle it
     if (!handledByVim) {
       const currentMode = context.mode;
       switch (currentMode) {
@@ -309,52 +289,32 @@ export function useVimModeAwareInput(handlers: {
 /**
  * High-level hook for text editor integration.
  * Automatically maps Vim commands to editor operations.
- * Application code only needs to provide editor operation callbacks,
- * without knowing about Vim commands or modes.
- *
- * @param operations - Editor operation callbacks:
- *   - onInsertChar: Called when a character should be inserted (INSERT mode text input)
- *   - onDeleteChar: Called when character at cursor should be deleted (NORMAL mode 'x')
- *   - onDeleteLine: Called when current line should be deleted (NORMAL mode 'dd')
- *   - onInsertNewline: Called when a newline should be inserted (INSERT mode Enter)
- *   - onBackspace: Called when backspace is pressed (INSERT mode Backspace)
  */
-export function useVimEditor(operations: EditorOperations): void {
+export function useVimEditor(
+  panelId: string,
+  operations: EditorOperations
+): void {
   const context = useVimContext();
 
-  // Memoize operations to prevent unnecessary re-runs
-  const memoizedOps = useMemo(
-    () => ({
-      onInsertChar: operations.onInsertChar,
-      onDeleteChar: operations.onDeleteChar,
-      onDeleteLine: operations.onDeleteLine,
-      onInsertNewline: operations.onInsertNewline,
-      onBackspace: operations.onBackspace,
-    }),
-    [
-      operations.onInsertChar,
-      operations.onDeleteChar,
-      operations.onDeleteLine,
-      operations.onInsertNewline,
-      operations.onBackspace,
-    ]
-  );
+  // Use ref to store latest operations
+  const opsRef = useRef(operations);
 
-  // Use Ink's useInput to receive all input events
+  useEffect(() => {
+    opsRef.current = operations;
+  }, [operations]);
+
   useInput((input, key) => {
-    // First, let the Vim dispatcher try to handle the input
     const handledByVim = context.inputDispatcher.process(input, key);
 
-    // Only handle unhandled input
+    // Only handle unhandled input in INSERT mode
     if (!handledByVim && context.mode === "INSERT") {
-      // Handle text input in INSERT mode
       if (key.backspace || key.delete) {
-        memoizedOps.onBackspace();
+        opsRef.current.onBackspace();
         return;
       }
 
       if (key.return) {
-        memoizedOps.onInsertNewline();
+        opsRef.current.onInsertNewline();
         return;
       }
 
@@ -367,19 +327,20 @@ export function useVimEditor(operations: EditorOperations): void {
         (input >= " " || input === "\t")
       ) {
         const char = input === "\t" ? "  " : input;
-        memoizedOps.onInsertChar(char);
+        opsRef.current.onInsertChar(char);
       }
     }
   });
 }
 
 /**
- * High-level hook that maps ACTION-style Vim commands (produced by the
- * parser in NORMAL/VISUAL modes, e.g. x, dd, 3dd) into editor
- * operations. This complements useVimEditor, which focuses on INSERT
- * mode text input.
+ * Hook that maps ACTION-style Vim commands to editor operations.
+ * Complements useVimEditor by handling NORMAL/VISUAL mode actions.
  */
-export function useVimEditorCommands(operations: EditorOperations): void {
+export function useVimEditorCommands(
+  panelId: string,
+  operations: Pick<EditorOperations, "onDeleteChar" | "onDeleteLine">
+): void {
   const memoizedOps = useMemo(
     () => ({
       onDeleteChar: operations.onDeleteChar,
@@ -388,7 +349,7 @@ export function useVimEditorCommands(operations: EditorOperations): void {
     [operations.onDeleteChar, operations.onDeleteLine]
   );
 
-  useVimCommand((command: VimCommand) => {
+  useVimCommand(panelId, (command: VimCommand) => {
     if (command.type !== "ACTION") {
       return;
     }
