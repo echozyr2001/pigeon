@@ -2,38 +2,41 @@
 
 import { Box, Text, useInput } from "ink";
 import { useVimMode } from "../hooks";
+import { useVimContext } from "../context/VimProvider";
 
 export function StatusLine() {
   const { mode, commandBuffer, statusMessage, commandInput, send } =
     useVimMode();
+  const { inputDispatcher } = useVimContext();
 
-  // Handle input in COMMAND mode
-  useInput(
-    (input, key) => {
-      if (mode === "COMMAND") {
-        if (key.return) {
-          // Execute command on Enter
-          if (commandInput.trim()) {
-            send({ type: "EXECUTE_COMMAND", command: commandInput.trim() });
-          } else {
-            send({ type: "ESCAPE" });
-          }
-        } else if (key.escape) {
-          // Cancel command on Escape
+  // Always handle input to keep the app alive and process Vim commands
+  useInput((input, key) => {
+    // First, let the Vim dispatcher process the input
+    const handled = inputDispatcher.process(input, key);
+
+    // If Vim didn't handle it and we're in COMMAND mode, handle command input
+    if (!handled && mode === "COMMAND") {
+      if (key.return) {
+        // Execute command on Enter
+        if (commandInput.trim()) {
+          send({ type: "EXECUTE_COMMAND", command: commandInput.trim() });
+        } else {
           send({ type: "ESCAPE" });
-        } else if (key.backspace || key.delete) {
-          // Handle backspace
-          const newInput = commandInput.slice(0, -1);
-          send({ type: "UPDATE_COMMAND_INPUT", input: newInput });
-        } else if (input && !key.ctrl && !key.meta) {
-          // Add regular characters to command input
-          const newInput = commandInput + input;
-          send({ type: "UPDATE_COMMAND_INPUT", input: newInput });
         }
+      } else if (key.escape) {
+        // Cancel command on Escape
+        send({ type: "ESCAPE" });
+      } else if (key.backspace || key.delete) {
+        // Handle backspace
+        const newInput = commandInput.slice(0, -1);
+        send({ type: "UPDATE_COMMAND_INPUT", input: newInput });
+      } else if (input && !key.ctrl && !key.meta) {
+        // Add regular characters to command input
+        const newInput = commandInput + input;
+        send({ type: "UPDATE_COMMAND_INPUT", input: newInput });
       }
-    },
-    { isActive: mode === "COMMAND" }
-  );
+    }
+  });
 
   // Format the status line content
   const formatStatusLine = () => {
