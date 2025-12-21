@@ -4,6 +4,7 @@ import { useEffect, useCallback, useMemo, useRef } from "react";
 import { useInput } from "ink";
 import { useVimContext } from "../context/VimProvider";
 import { DevWarningManager } from "../utils/DevWarningManager";
+import { vimErrorHandler } from "../utils/ErrorHandler";
 import type {
   SpatialRelationships,
   VimCommand,
@@ -483,20 +484,39 @@ export function useEnhancedVimEditor(
   // Automatic panel registration and cleanup
   useEffect(() => {
     if (autoRegister && panelId) {
-      // Register panel
-      navigation.register(panelId, relationships);
-      devWarningManager.registerPanel(panelId);
+      try {
+        // Register panel
+        navigation.register(panelId, relationships);
+        devWarningManager.registerPanel(panelId);
 
-      // Auto-focus if no active panel and autoFocus is enabled
-      if (autoFocus && !context.activePanelId) {
-        navigation.focus(panelId);
+        // Auto-focus if no active panel and autoFocus is enabled
+        if (autoFocus && !context.activePanelId) {
+          navigation.focus(panelId);
+        }
+
+        return () => {
+          try {
+            // Cleanup on unmount
+            navigation.unregister(panelId);
+            devWarningManager.unregisterPanel(panelId);
+          } catch (error) {
+            vimErrorHandler.createError("REGISTRATION_FAILED", {
+              panelId,
+              originalError:
+                error instanceof Error ? error : new Error(String(error)),
+              customMessage: `Failed to unregister panel "${panelId}" during cleanup`,
+              location: `useEnhancedVimEditor cleanup for panel "${panelId}"`,
+            });
+          }
+        };
+      } catch (error) {
+        vimErrorHandler.handleRegistrationError(
+          panelId,
+          relationships,
+          error instanceof Error ? error : new Error(String(error))
+        );
+        // Don't throw - allow component to continue functioning
       }
-
-      return () => {
-        // Cleanup on unmount
-        navigation.unregister(panelId);
-        devWarningManager.unregisterPanel(panelId);
-      };
     }
   }, [
     autoRegister,
@@ -510,37 +530,75 @@ export function useEnhancedVimEditor(
 
   // Mode-aware input handling
   useInput((input, key) => {
-    const handledByVim = context.inputDispatcher.process(input, key);
+    try {
+      const handledByVim = context.inputDispatcher.process(input, key);
 
-    if (!handledByVim && context.activePanelId === panelId) {
-      const currentMode = context.mode;
-      const callbacks = callbacksRef.current;
+      if (!handledByVim && context.activePanelId === panelId) {
+        const currentMode = context.mode;
+        const callbacks = callbacksRef.current;
 
-      switch (currentMode) {
-        case "INSERT":
-          callbacks.onInsertInput?.(input, key);
-          break;
-        case "NORMAL":
-          callbacks.onNormalInput?.(input, key);
-          break;
-        case "COMMAND":
-          callbacks.onCommandInput?.(input, key);
-          break;
-        case "VISUAL":
-          callbacks.onVisualInput?.(input, key);
-          break;
+        try {
+          switch (currentMode) {
+            case "INSERT":
+              callbacks.onInsertInput?.(input, key);
+              break;
+            case "NORMAL":
+              callbacks.onNormalInput?.(input, key);
+              break;
+            case "COMMAND":
+              callbacks.onCommandInput?.(input, key);
+              break;
+            case "VISUAL":
+              callbacks.onVisualInput?.(input, key);
+              break;
+          }
+        } catch (callbackError) {
+          vimErrorHandler.handleInputProcessingError(
+            currentMode,
+            input,
+            panelId,
+            callbackError instanceof Error
+              ? callbackError
+              : new Error(String(callbackError))
+          );
+        }
       }
+    } catch (error) {
+      vimErrorHandler.handleInputProcessingError(
+        context.mode,
+        input,
+        panelId,
+        error instanceof Error ? error : new Error(String(error))
+      );
     }
   });
 
   // Focus and blur functions
   const focus = useCallback(() => {
-    navigation.focus(panelId);
-  }, [navigation, panelId]);
+    try {
+      navigation.focus(panelId);
+    } catch (error) {
+      vimErrorHandler.handleFocusError(
+        panelId,
+        context.activePanelId || undefined,
+        error instanceof Error ? error : new Error(String(error))
+      );
+    }
+  }, [navigation, panelId, context.activePanelId]);
 
   const blur = useCallback(() => {
-    if (context.activePanelId === panelId) {
-      context.setActivePanelId(null);
+    try {
+      if (context.activePanelId === panelId) {
+        context.setActivePanelId(null);
+      }
+    } catch (error) {
+      vimErrorHandler.createError("FOCUS_FAILED", {
+        panelId,
+        originalError:
+          error instanceof Error ? error : new Error(String(error)),
+        customMessage: `Failed to blur panel "${panelId}"`,
+        location: `useEnhancedVimEditor blur for panel "${panelId}"`,
+      });
     }
   }, [context, panelId]);
 

@@ -1,6 +1,8 @@
 // Development Warning System for ink-vim-mode
 // Provides centralized warning handling with environment detection
 
+import { VimErrorHandler, vimErrorHandler } from "./ErrorHandler";
+
 // Global declarations for environment detection
 declare const process: any;
 declare const window: any;

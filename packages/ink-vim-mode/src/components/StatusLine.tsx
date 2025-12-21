@@ -3,8 +3,16 @@
 import { Box, Text, useInput } from "ink";
 import { useVimMode } from "../hooks";
 import { useVimContext } from "../context/VimProvider";
+import { StatusLineProps, VimMode } from "../types";
 
-export function StatusLine() {
+export function StatusLine({
+  position = "bottom",
+  showMode = true,
+  showCommandBuffer = true,
+  showMessage = true,
+  customModeNames,
+  style,
+}: StatusLineProps = {}) {
   const { mode, commandBuffer, statusMessage, commandInput, send } =
     useVimMode();
   const { inputDispatcher } = useVimContext();
@@ -38,34 +46,82 @@ export function StatusLine() {
     }
   });
 
+  // Get display name for current mode
+  const getModeDisplayName = (currentMode: VimMode): string => {
+    if (customModeNames && customModeNames[currentMode]) {
+      return customModeNames[currentMode]!;
+    }
+
+    // Default mode names with visual indicators
+    switch (currentMode) {
+      case "NORMAL":
+        return "NORMAL";
+      case "INSERT":
+        return "INSERT";
+      case "VISUAL":
+        return "VISUAL";
+      case "COMMAND":
+        return "COMMAND";
+      default:
+        return currentMode;
+    }
+  };
+
   // Format the status line content
   const formatStatusLine = () => {
     const parts: string[] = [];
 
-    // Add mode indicator
-    parts.push(`-- ${mode} --`);
+    // Add mode indicator if enabled
+    if (showMode) {
+      const modeDisplay = getModeDisplayName(mode);
+      parts.push(`-- ${modeDisplay} --`);
+    }
 
-    // Add command buffer (numeric prefix) if present
-    if (commandBuffer && mode === "NORMAL") {
+    // Add command buffer (numeric prefix) if present and enabled
+    // Show pending commands from command buffer in NORMAL mode
+    if (showCommandBuffer && commandBuffer && mode === "NORMAL") {
       parts.push(commandBuffer);
     }
 
-    // Add command input in COMMAND mode
+    // Display command input text in COMMAND mode
     if (mode === "COMMAND") {
       parts.push(`:${commandInput}`);
     }
 
-    // Add status message if present
-    if (statusMessage) {
+    // Add status message if present and enabled
+    if (showMessage && statusMessage) {
       parts.push(statusMessage);
     }
 
     return parts.join(" ");
   };
 
+  // Apply custom styling and positioning
+  const textStyle = {
+    color: style?.textColor,
+  };
+
+  const boxStyle: any = {
+    backgroundColor: style?.backgroundColor,
+  };
+
+  // Add border styling if specified
+  if (style?.borderStyle) {
+    boxStyle.borderStyle = style.borderStyle;
+  }
+
+  // Position-specific styling
+  const positionStyle =
+    position === "top" ? { marginBottom: 1 } : { marginTop: 1 };
+
   return (
-    <Box width="100%" justifyContent="flex-start">
-      <Text>{formatStatusLine()}</Text>
+    <Box
+      width="100%"
+      justifyContent="flex-start"
+      {...boxStyle}
+      {...positionStyle}
+    >
+      <Text {...textStyle}>{formatStatusLine()}</Text>
     </Box>
   );
 }

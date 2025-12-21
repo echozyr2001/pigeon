@@ -8,6 +8,8 @@ import type {
   PanelRegistry,
 } from "../types";
 import { parseKeyToCommand } from "./parser";
+import { ModeTransitionHandler } from "../utils/ModeTransitionHandler";
+import { vimErrorHandler } from "../utils/ErrorHandler";
 
 export interface InputDispatcherDependencies {
   getCurrentMode: () => VimMode;
@@ -126,20 +128,68 @@ export class InputDispatcher {
   }
 
   /**
-   * Tier 2: Handle mode-specific input
+   * Tier 2: Handle mode-specific input with automatic mode transitions
    */
   private handleModeInput(input: string, key: any): boolean {
     const currentMode = this.dependencies.getCurrentMode();
+    const activePanelId = this.dependencies.getActivePanelId();
+    const commandBuffer = this.dependencies.getCommandBuffer();
 
+    // Check for automatic mode transitions first
+    const transitionContext = {
+      currentMode,
+      input,
+      key,
+      commandBuffer,
+      activePanelId,
+    };
+
+    try {
+      const transitionResult =
+        ModeTransitionHandler.handleModeTransition(transitionContext);
+
+      if (transitionResult.shouldTransition && transitionResult.targetMode) {
+        // Handle the mode transition
+        this.handleModeTransition(
+          currentMode,
+          transitionResult.targetMode,
+          transitionResult.specialAction
+        );
+        return true;
+      }
+
+      if (
+        transitionResult.handled &&
+        transitionResult.requiresSpecialHandling
+      ) {
+        // Handle special actions without mode transition
+        this.handleSpecialAction(transitionResult.specialAction);
+        return true;
+      }
+
+      if (transitionResult.handled) {
+        return true;
+      }
+    } catch (error) {
+      vimErrorHandler.handleInputProcessingError(
+        currentMode,
+        input,
+        activePanelId || undefined,
+        error instanceof Error ? error : new Error(String(error))
+      );
+      // Continue with fallback handling
+    }
+
+    // Fallback to original mode-specific handling
     switch (currentMode) {
       case "NORMAL":
-        return this.handleNormalModeInput(input, key);
+        return this.handleNormalModeInputFallback(input, key);
       case "INSERT":
-        return this.handleInsertModeInput(input, key);
+        return this.handleInsertModeInputFallback(input, key);
       case "VISUAL":
-        return this.handleVisualModeInput(input, key);
+        return this.handleVisualModeInputFallback(input, key);
       case "COMMAND":
-        return this.handleCommandModeInput(input, key);
+        return this.handleCommandModeInputFallback(input, key);
       default:
         return false;
     }
@@ -192,31 +242,101 @@ export class InputDispatcher {
   }
 
   /**
-   * Handle NORMAL mode input
+   * Handle mode transition with proper event dispatching
    */
-  private handleNormalModeInput(input: string, key: any): boolean {
-    // Handle Escape key
-    if (key.escape) {
-      this.dependencies.sendModeEvent({ type: "ESCAPE" });
-      return true;
-    }
+  private handleModeTransition(
+    fromMode: VimMode,
+    toMode: VimMode,
+    specialAction?: string
+  ): void {
+    try {
+      // Send appropriate mode transition event
+      switch (toMode) {
+        case "INSERT":
+          this.dependencies.sendModeEvent({ type: "ENTER_INSERT" });
+          break;
+        case "NORMAL":
+          this.dependencies.sendModeEvent({ type: "ESCAPE" });
+          break;
+        case "VISUAL":
+          this.dependencies.sendModeEvent({ type: "ENTER_VISUAL" });
+          break;
+        case "COMMAND":
+          this.dependencies.sendModeEvent({ type: "ENTER_COMMAND" });
+          break;
+      }
 
-    // Handle mode transitions
-    if (input === "i" || input === "a") {
-      this.dependencies.sendModeEvent({ type: "ENTER_INSERT" });
-      return true;
+      // Handle special actions that accompany mode transitions
+      if (specialAction) {
+        this.handleSpecialAction(specialAction);
+      }
+    } catch (error) {
+      vimErrorHandler.createError("INPUT_PROCESSING_FAILED", {
+        originalError:
+          error instanceof Error ? error : new Error(String(error)),
+        customMessage: `Failed to transition from ${fromMode} to ${toMode}`,
+        customSuggestion:
+          "Check that mode transition handlers are properly configured and don't throw exceptions.",
+        location: `Mode transition: ${fromMode} -> ${toMode}`,
+      });
     }
+  }
 
-    if (input === ":") {
-      this.dependencies.sendModeEvent({ type: "ENTER_COMMAND" });
-      return true;
+  /**
+   * Handle special actions that don't involve mode transitions
+   */
+  private handleSpecialAction(action?: string): void {
+    if (!action) return;
+
+    try {
+      switch (action) {
+        case "CLEAR_BUFFER":
+          this.dependencies.sendModeEvent({ type: "CLEAR_BUFFER" });
+          break;
+        case "CANCEL_COMMAND":
+          this.dependencies.sendModeEvent({ type: "ESCAPE" });
+          break;
+        case "EXECUTE_COMMAND":
+          // Get current command input and execute it
+          this.dependencies.sendModeEvent({
+            type: "EXECUTE_COMMAND",
+            command: "", // Command will be handled by the state machine
+          });
+          break;
+        // Special insert mode actions could be handled here in the future
+        case "APPEND_MODE":
+        case "OPEN_LINE_BELOW":
+        case "OPEN_LINE_ABOVE":
+        case "APPEND_END_OF_LINE":
+        case "INSERT_BEGINNING_OF_LINE":
+        case "VISUAL_LINE_MODE":
+        case "SEARCH_FORWARD":
+        case "SEARCH_BACKWARD":
+        case "VISUAL_COMMAND":
+          // These actions are handled by the components themselves
+          // The mode transition is sufficient for now
+          break;
+        default:
+          console.warn(`Unknown special action: ${action}`);
+      }
+    } catch (error) {
+      vimErrorHandler.createError("INPUT_PROCESSING_FAILED", {
+        originalError:
+          error instanceof Error ? error : new Error(String(error)),
+        customMessage: `Failed to handle special action: ${action}`,
+        customSuggestion:
+          "Check that special action handlers are properly implemented.",
+        location: `Special action handler: ${action}`,
+      });
     }
-
-    if (input === "v") {
-      this.dependencies.sendModeEvent({ type: "ENTER_VISUAL" });
-      return true;
-    }
-
+  }
+  /**
+   * Handle NORMAL mode input (fallback for non-standard transitions)
+   */
+  /**
+   * Handle NORMAL mode input (fallback for non-standard transitions)
+   */
+  private handleNormalModeInputFallback(input: string, key: any): boolean {
     // Handle numeric prefixes (digits). We only mutate the state machine's
     // commandBuffer/count here; translation into concrete VimCommand
     // objects is delegated to the pure parser.
@@ -230,64 +350,39 @@ export class InputDispatcher {
   }
 
   /**
-   * Handle INSERT mode input - mostly pass through
+   * Handle INSERT mode input (fallback for non-standard transitions)
    */
-  private handleInsertModeInput(input: string, key: any): boolean {
-    // Only handle Escape in INSERT mode
-    if (key.escape) {
-      this.dependencies.sendModeEvent({ type: "ESCAPE" });
-      return true;
-    }
-
-    // All other input should be passed through to the component
+  /**
+   * Handle INSERT mode input (fallback for non-standard transitions)
+   */
+  private handleInsertModeInputFallback(input: string, key: any): boolean {
+    // All input in INSERT mode should be passed through to the component
+    // Mode transitions are handled by the automatic mode transition handler
     return false;
   }
 
   /**
-   * Handle VISUAL mode input
+   * Handle VISUAL mode input (fallback for non-standard transitions)
    */
-  private handleVisualModeInput(input: string, key: any): boolean {
-    // Handle Escape key
-    if (key.escape) {
-      this.dependencies.sendModeEvent({ type: "ESCAPE" });
-      return true;
-    }
-
-    // Handle mode transitions
-    if (input === "i" || input === "a") {
-      this.dependencies.sendModeEvent({ type: "ENTER_INSERT" });
-      return true;
-    }
-
-    if (input === ":") {
-      this.dependencies.sendModeEvent({ type: "ENTER_COMMAND" });
-      return true;
-    }
-
+  /**
+   * Handle VISUAL mode input (fallback for non-standard transitions)
+   */
+  private handleVisualModeInputFallback(input: string, key: any): boolean {
     // VISUAL-specific motions are expressed as VimCommand objects through
     // the parser and handled by component-level handlers.
+    // Mode transitions are handled by the automatic mode transition handler
     return false;
   }
 
   /**
-   * Handle COMMAND mode input
+   * Handle COMMAND mode input (fallback for non-standard transitions)
    */
-  private handleCommandModeInput(input: string, key: any): boolean {
-    // Handle Escape key
-    if (key.escape) {
-      this.dependencies.sendModeEvent({ type: "ESCAPE" });
-      return true;
-    }
-
-    // Handle Enter key to execute command
-    if (key.return) {
-      // For now, just return to NORMAL mode
-      // Command execution will be implemented in a later task
-      this.dependencies.sendModeEvent({ type: "EXECUTE_COMMAND", command: "" });
-      return true;
-    }
-
-    // All other input in COMMAND mode should be handled by the status line component
+  /**
+   * Handle COMMAND mode input (fallback for non-standard transitions)
+   */
+  private handleCommandModeInputFallback(input: string, key: any): boolean {
+    // All input in COMMAND mode should be handled by the status line component
+    // Mode transitions are handled by the automatic mode transition handler
     return false;
   }
 

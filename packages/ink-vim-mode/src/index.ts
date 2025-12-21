@@ -40,6 +40,7 @@ export type {
   NavigationCommand,
   ActionCommand,
   StatusLineState,
+  StatusLineProps,
   Direction,
   VimModeContext,
   VimModeEvent,

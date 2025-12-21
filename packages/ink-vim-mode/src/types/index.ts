@@ -116,6 +116,19 @@ export interface StatusLineState {
   commandInput: string; // For COMMAND mode
 }
 
+export interface StatusLineProps {
+  position?: "top" | "bottom"; // Default: 'bottom'
+  showMode?: boolean; // Default: true
+  showCommandBuffer?: boolean; // Default: true
+  showMessage?: boolean; // Default: true
+  customModeNames?: Partial<Record<VimMode, string>>;
+  style?: {
+    backgroundColor?: string;
+    textColor?: string;
+    borderStyle?: "single" | "double" | "round";
+  };
+}
+
 // Hook Return Types
 export interface VimNavigationHook {
   register: (id: string, relationships: SpatialRelationships) => void;
@@ -182,6 +195,25 @@ export interface DevWarningConfig {
   warnOnHookConflicts: boolean;
   warnOnUnregisteredPanels: boolean;
   warnOnDeprecatedPatterns: boolean;
+}
+
+// Enhanced Error Handling Types
+export type VimErrorType =
+  | "REGISTRATION_FAILED"
+  | "INPUT_PROCESSING_FAILED"
+  | "FOCUS_FAILED"
+  | "PANEL_CONFLICT"
+  | "INVALID_CONFIGURATION"
+  | "HOOK_USAGE_ERROR";
+
+export interface VimError {
+  type: VimErrorType;
+  message: string;
+  panelId?: string;
+  originalError?: Error;
+  timestamp: Date;
+  location?: string;
+  suggestion?: string;
 }
 
 // Enhanced useVimEditor Hook Types
