@@ -50,6 +50,11 @@ export type {
   CommandResult,
   CommandExecutor,
   EditorOperations,
+  WarningType,
+  DevWarning,
+  DevWarningConfig,
+  UseVimEditorOptions,
+  UseVimEditorReturn,
 } from "./types";
 
 // Type guards
@@ -57,3 +62,6 @@ export { isMotionCommand } from "./type-guards";
 
 // Type guard utilities
 export { isNavigationCommand, isActionCommand } from "./type-guards";
+
+// Development utilities
+export { DevWarningManager, devWarningManager } from "./utils";

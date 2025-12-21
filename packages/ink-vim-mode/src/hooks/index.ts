@@ -3,6 +3,7 @@
 import { useEffect, useCallback, useMemo, useRef } from "react";
 import { useInput } from "ink";
 import { useVimContext } from "../context/VimProvider";
+import { DevWarningManager } from "../utils/DevWarningManager";
 import type {
   SpatialRelationships,
   VimCommand,
@@ -12,6 +13,8 @@ import type {
   EditorOperations,
   Direction,
   MotionCommand,
+  UseVimEditorOptions,
+  UseVimEditorReturn,
 } from "../types";
 
 // Helper: Type guard for MotionCommand
@@ -81,6 +84,19 @@ export function useVimInput(
   handler: (command: VimCommand) => void
 ): VimInputHook {
   const context = useVimContext();
+
+  // Get DevWarningManager instance
+  const devWarningManager = useMemo(() => {
+    return DevWarningManager.getInstance();
+  }, []);
+
+  // Register hook usage for conflict detection
+  useEffect(() => {
+    devWarningManager.registerActiveHook("useVimInput", panelId);
+    return () => {
+      devWarningManager.unregisterActiveHook("useVimInput", panelId);
+    };
+  }, [devWarningManager, panelId]);
 
   // Store latest handler and mode in refs - updates don't trigger re-registration
   const handlerRef = useRef(handler);
@@ -229,6 +245,23 @@ export function useVimUnhandledInput(
   const context = useVimContext();
   const memoizedHandler = useCallback(handler, [handler]);
 
+  // Get DevWarningManager instance
+  const devWarningManager = useMemo(() => {
+    return DevWarningManager.getInstance();
+  }, []);
+
+  // Register hook usage for conflict detection (use a generic panel ID for global hooks)
+  useEffect(() => {
+    const globalPanelId = "__global__";
+    devWarningManager.registerActiveHook("useVimUnhandledInput", globalPanelId);
+    return () => {
+      devWarningManager.unregisterActiveHook(
+        "useVimUnhandledInput",
+        globalPanelId
+      );
+    };
+  }, [devWarningManager]);
+
   useInput((input, key) => {
     const handledByVim = context.inputDispatcher.process(input, key);
 
@@ -249,6 +282,23 @@ export function useVimModeAwareInput(handlers: {
   onCommandInput?: (input: string, key: any) => void;
 }): void {
   const context = useVimContext();
+
+  // Get DevWarningManager instance
+  const devWarningManager = useMemo(() => {
+    return DevWarningManager.getInstance();
+  }, []);
+
+  // Register hook usage for conflict detection (use a generic panel ID for global hooks)
+  useEffect(() => {
+    const globalPanelId = "__global__";
+    devWarningManager.registerActiveHook("useVimModeAwareInput", globalPanelId);
+    return () => {
+      devWarningManager.unregisterActiveHook(
+        "useVimModeAwareInput",
+        globalPanelId
+      );
+    };
+  }, [devWarningManager]);
 
   const memoizedOnInsert = useCallback(handlers.onInsertInput, [
     handlers.onInsertInput,
@@ -287,14 +337,32 @@ export function useVimModeAwareInput(handlers: {
 }
 
 /**
- * High-level hook for text editor integration.
+ * Legacy implementation for backward compatibility.
  * Automatically maps Vim commands to editor operations.
  */
-export function useVimEditor(
+function useVimEditorLegacy(
   panelId: string,
   operations: EditorOperations
 ): void {
   const context = useVimContext();
+
+  // Get DevWarningManager instance
+  const devWarningManager = useMemo(() => {
+    return DevWarningManager.getInstance();
+  }, []);
+
+  // Register hook usage for conflict detection and warn about deprecated pattern
+  useEffect(() => {
+    devWarningManager.registerActiveHook("useVimEditorLegacy", panelId);
+    devWarningManager.warnDeprecatedPattern(
+      "useVimEditor with EditorOperations",
+      "useVimEditor with UseVimEditorOptions",
+      panelId
+    );
+    return () => {
+      devWarningManager.unregisterActiveHook("useVimEditorLegacy", panelId);
+    };
+  }, [devWarningManager, panelId]);
 
   // Use ref to store latest operations
   const opsRef = useRef(operations);
@@ -331,6 +399,172 @@ export function useVimEditor(
       }
     }
   });
+}
+
+/**
+ * Primary useVimEditor hook with overloaded signatures for backward compatibility.
+ * Supports both the legacy EditorOperations interface and the new UseVimEditorOptions interface.
+ */
+export function useVimEditor(options: UseVimEditorOptions): UseVimEditorReturn;
+export function useVimEditor(
+  panelId: string,
+  operations: EditorOperations
+): void;
+export function useVimEditor(
+  optionsOrPanelId: UseVimEditorOptions | string,
+  operations?: EditorOperations
+): UseVimEditorReturn | void {
+  // Type guard to determine which signature is being used
+  if (typeof optionsOrPanelId === "string" && operations) {
+    // Legacy signature: useVimEditor(panelId, operations)
+    return useVimEditorLegacy(optionsOrPanelId, operations);
+  } else if (typeof optionsOrPanelId === "object" && optionsOrPanelId.panelId) {
+    // New signature: useVimEditor(options)
+    return useEnhancedVimEditor(optionsOrPanelId);
+  } else {
+    throw new Error(
+      "Invalid useVimEditor arguments. Expected either (options: UseVimEditorOptions) or (panelId: string, operations: EditorOperations)"
+    );
+  }
+}
+
+/**
+ * Enhanced useVimEditor hook with automatic lifecycle management.
+ * This is the primary hook for most use cases, providing mode-aware input routing,
+ * automatic panel registration, and comprehensive error handling.
+ */
+export function useEnhancedVimEditor(
+  options: UseVimEditorOptions
+): UseVimEditorReturn {
+  const context = useVimContext();
+  const navigation = useVimNavigation();
+
+  // Get DevWarningManager instance
+  const devWarningManager = useMemo(() => {
+    return DevWarningManager.getInstance();
+  }, []);
+
+  const {
+    panelId,
+    onInsertInput,
+    onNormalInput,
+    onCommandInput,
+    onVisualInput,
+    autoRegister = true,
+    autoFocus = true,
+    relationships = {},
+  } = options;
+
+  // Register hook usage for conflict detection
+  useEffect(() => {
+    devWarningManager.registerActiveHook("useEnhancedVimEditor", panelId);
+    return () => {
+      devWarningManager.unregisterActiveHook("useEnhancedVimEditor", panelId);
+    };
+  }, [devWarningManager, panelId]);
+
+  // Store latest callbacks in refs to avoid re-registration
+  const callbacksRef = useRef({
+    onInsertInput,
+    onNormalInput,
+    onCommandInput,
+    onVisualInput,
+  });
+
+  useEffect(() => {
+    callbacksRef.current = {
+      onInsertInput,
+      onNormalInput,
+      onCommandInput,
+      onVisualInput,
+    };
+  }, [onInsertInput, onNormalInput, onCommandInput, onVisualInput]);
+
+  // Automatic panel registration and cleanup
+  useEffect(() => {
+    if (autoRegister && panelId) {
+      // Register panel
+      navigation.register(panelId, relationships);
+      devWarningManager.registerPanel(panelId);
+
+      // Auto-focus if no active panel and autoFocus is enabled
+      if (autoFocus && !context.activePanelId) {
+        navigation.focus(panelId);
+      }
+
+      return () => {
+        // Cleanup on unmount
+        navigation.unregister(panelId);
+        devWarningManager.unregisterPanel(panelId);
+      };
+    }
+  }, [
+    autoRegister,
+    panelId,
+    relationships,
+    autoFocus,
+    context.activePanelId,
+    navigation,
+    devWarningManager,
+  ]);
+
+  // Mode-aware input handling
+  useInput((input, key) => {
+    const handledByVim = context.inputDispatcher.process(input, key);
+
+    if (!handledByVim && context.activePanelId === panelId) {
+      const currentMode = context.mode;
+      const callbacks = callbacksRef.current;
+
+      switch (currentMode) {
+        case "INSERT":
+          callbacks.onInsertInput?.(input, key);
+          break;
+        case "NORMAL":
+          callbacks.onNormalInput?.(input, key);
+          break;
+        case "COMMAND":
+          callbacks.onCommandInput?.(input, key);
+          break;
+        case "VISUAL":
+          callbacks.onVisualInput?.(input, key);
+          break;
+      }
+    }
+  });
+
+  // Focus and blur functions
+  const focus = useCallback(() => {
+    navigation.focus(panelId);
+  }, [navigation, panelId]);
+
+  const blur = useCallback(() => {
+    if (context.activePanelId === panelId) {
+      context.setActivePanelId(null);
+    }
+  }, [context, panelId]);
+
+  return useMemo(
+    () => ({
+      mode: context.mode,
+      isActive: context.activePanelId === panelId,
+      commandBuffer: context.commandBuffer,
+      statusMessage: context.statusMessage,
+      commandInput: context.commandInput,
+      focus,
+      blur,
+    }),
+    [
+      context.mode,
+      context.activePanelId,
+      panelId,
+      context.commandBuffer,
+      context.statusMessage,
+      context.commandInput,
+      focus,
+      blur,
+    ]
+  );
 }
 
 /**

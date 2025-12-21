@@ -134,7 +134,7 @@ export interface VimModeHook {
 export interface VimInputHook {
   isActive: boolean;
   mode: VimMode;
-  unregister: () => void;  // Added for manual cleanup
+  unregister: () => void; // Added for manual cleanup
 }
 
 // Editor operations interface
@@ -161,4 +161,47 @@ export interface CommandExecutor {
   ): void;
   unregisterCommand(name: string): void;
   getAvailableCommands(): string[];
+}
+
+// Development Warning Types
+export type WarningType =
+  | "HOOK_CONFLICT"
+  | "UNREGISTERED_PANEL"
+  | "DEPRECATED_PATTERN";
+
+export interface DevWarning {
+  type: WarningType;
+  message: string;
+  panelId?: string;
+  timestamp: Date;
+  stack?: string;
+}
+
+export interface DevWarningConfig {
+  enabled: boolean; // process.env.NODE_ENV === 'development'
+  warnOnHookConflicts: boolean;
+  warnOnUnregisteredPanels: boolean;
+  warnOnDeprecatedPatterns: boolean;
+}
+
+// Enhanced useVimEditor Hook Types
+export interface UseVimEditorOptions {
+  panelId: string;
+  onInsertInput?: (input: string, key: any) => void;
+  onNormalInput?: (input: string, key: any) => void;
+  onCommandInput?: (input: string, key: any) => void;
+  onVisualInput?: (input: string, key: any) => void;
+  autoRegister?: boolean; // Default: true
+  autoFocus?: boolean; // Default: true if no active panel
+  relationships?: SpatialRelationships;
+}
+
+export interface UseVimEditorReturn {
+  mode: VimMode;
+  isActive: boolean;
+  commandBuffer: string;
+  statusMessage: string | null;
+  commandInput: string;
+  focus: () => void;
+  blur: () => void;
 }
