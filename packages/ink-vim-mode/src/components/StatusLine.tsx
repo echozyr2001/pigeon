@@ -19,6 +19,18 @@ export function StatusLine({
 
   // Always handle input to keep the app alive and process Vim commands
   useInput((input, key) => {
+    // Skip empty inputs that are not actual key presses or control keys
+    if (input === "" && !key.ctrl && !key.escape && !key.return && !key.backspace && !key.delete) {
+      return;
+    }
+
+    // Terminal compatibility: Skip backspace/delete when in NORMAL mode
+    // These are handled by the dispatcher for spatial navigation
+    if ((key.backspace || key.delete) && input === "" && mode === "NORMAL") {
+      inputDispatcher.process(input, key);
+      return;
+    }
+
     // First, let the Vim dispatcher process the input
     const handled = inputDispatcher.process(input, key);
 

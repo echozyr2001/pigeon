@@ -85,6 +85,12 @@ export class InputDispatcher {
       return false;
     }
 
+    // Skip empty inputs that are not actual key presses
+    // These are often internal Ink events or terminal artifacts
+    if (input === "" && !key.ctrl && !key.escape && !key.return && !key.backspace && !key.delete) {
+      return false;
+    }
+
     const currentMode = this.dependencies.getCurrentMode();
 
     // Tier 1: Global handlers (highest priority)
@@ -114,13 +120,24 @@ export class InputDispatcher {
 
   /**
    * Tier 1: Handle global input (Ctrl+hjkl spatial navigation)
+   * Also handles backspace/delete as Ctrl+h equivalents (terminal compatibility)
    */
   private handleGlobalInput(input: string, key: any): boolean {
-    // Handle Ctrl+hjkl for spatial navigation with highest priority
+    // Handle Ctrl+hjkl for spatial navigation
     if (key.ctrl) {
       const direction = this.getDirectionFromInput(input);
       if (direction) {
         return this.handleSpatialNavigation(direction);
+      }
+    }
+
+    // Terminal compatibility: Some terminals send backspace/delete for Ctrl+h
+    // Treat backspace as "left" navigation when no input is provided
+    if ((key.backspace || key.delete) && input === "") {
+      // Check if we're in NORMAL mode and not in COMMAND mode
+      const currentMode = this.dependencies.getCurrentMode();
+      if (currentMode === "NORMAL") {
+        return this.handleSpatialNavigation("h"); // Treat as left
       }
     }
 

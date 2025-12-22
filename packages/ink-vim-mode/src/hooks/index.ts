@@ -481,17 +481,37 @@ export function useEnhancedVimEditor(
     };
   }, [onInsertInput, onNormalInput, onCommandInput, onVisualInput]);
 
-  // Automatic panel registration and cleanup
+  // Store context in ref for use in setTimeout
+  const contextRef = useRef(context);
+
+  // Update ref on every render
   useEffect(() => {
-    if (autoRegister && panelId) {
+    contextRef.current = context;
+  }, [context]);
+
+  // Automatic panel registration and cleanup
+  // Use ref to prevent duplicate registrations
+  const hasRegisteredRef = useRef(false);
+
+  useEffect(() => {
+    // Only register once per component lifecycle
+    if (autoRegister && panelId && !hasRegisteredRef.current) {
       try {
         // Register panel
         navigation.register(panelId, relationships);
         devWarningManager.registerPanel(panelId);
+        hasRegisteredRef.current = true;
 
         // Auto-focus if no active panel and autoFocus is enabled
-        if (autoFocus && !context.activePanelId) {
-          navigation.focus(panelId);
+        // Use setTimeout to ensure all panels in the tree have had a chance to register
+        if (autoFocus) {
+          setTimeout(() => {
+            // Get the CURRENT active panel state from ref
+            const currentActive = contextRef.current.activePanelId;
+            if (!currentActive) {
+              navigation.focus(panelId);
+            }
+          }, 0);
         }
 
         return () => {
@@ -499,6 +519,7 @@ export function useEnhancedVimEditor(
             // Cleanup on unmount
             navigation.unregister(panelId);
             devWarningManager.unregisterPanel(panelId);
+            hasRegisteredRef.current = false;
           } catch (error) {
             vimErrorHandler.createError("REGISTRATION_FAILED", {
               panelId,
@@ -523,13 +544,28 @@ export function useEnhancedVimEditor(
     panelId,
     relationships,
     autoFocus,
-    context.activePanelId,
+    // Note: We intentionally omit context.activePanelId to prevent re-registrations
+    // The auto-focus logic uses setTimeout to handle the timing correctly
     navigation,
     devWarningManager,
   ]);
 
   // Mode-aware input handling
   useInput((input, key) => {
+    // Skip empty inputs that are not actual key presses or control keys
+    // These are often internal Ink events or terminal artifacts
+    if (input === "" && !key.ctrl && !key.escape && !key.return && !key.backspace && !key.delete) {
+      return;
+    }
+
+    // Terminal compatibility: Skip backspace/delete when in NORMAL mode
+    // These are handled by the dispatcher for spatial navigation
+    if ((key.backspace || key.delete) && input === "" && context.mode === "NORMAL") {
+      // Let the dispatcher handle this as Ctrl+h equivalent
+      context.inputDispatcher.process(input, key);
+      return;
+    }
+
     try {
       const handledByVim = context.inputDispatcher.process(input, key);
 
