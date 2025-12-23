@@ -4,6 +4,7 @@ import { Box, Text, useInput } from "ink";
 import { useVimMode } from "../hooks";
 import { useVimContext } from "../context/VimProvider";
 import { StatusLineProps, VimMode } from "../types";
+import { globalCommandRegistry } from "../commands/registry";
 
 export function StatusLine({
   position = "bottom",
@@ -12,6 +13,7 @@ export function StatusLine({
   showMessage = true,
   customModeNames,
   style,
+  onCommand,
 }: StatusLineProps = {}) {
   const { mode, commandBuffer, statusMessage, commandInput, send } =
     useVimMode();
@@ -39,7 +41,15 @@ export function StatusLine({
       if (key.return) {
         // Execute command on Enter
         if (commandInput.trim()) {
-          send({ type: "EXECUTE_COMMAND", command: commandInput.trim() });
+          const command = commandInput.trim();
+          send({ type: "EXECUTE_COMMAND", command });
+
+          // Call onCommand callback if provided
+          if (onCommand) {
+            // Execute command to get result for callback
+            const result = globalCommandRegistry.execute(command);
+            onCommand(command, result);
+          }
         } else {
           send({ type: "ESCAPE" });
         }

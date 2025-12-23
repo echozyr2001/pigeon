@@ -1,7 +1,7 @@
 // XState machines for Vim mode management
 import { createMachine, assign } from "xstate";
 import type { VimModeContext, VimModeEvent, VimMode } from "../types";
-import { defaultCommandExecutor } from "../commands";
+import { globalCommandRegistry } from "../commands/registry";
 
 export const vimModeMachine = createMachine({
   id: "vimMode",
@@ -128,7 +128,7 @@ export const vimModeMachine = createMachine({
           {
             target: "NORMAL",
             guard: ({ event }) => {
-              const result = defaultCommandExecutor.execute(event.command);
+              const result = globalCommandRegistry.execute(event.command);
               return result.success;
             },
             actions: assign({
@@ -136,7 +136,7 @@ export const vimModeMachine = createMachine({
               commandBuffer: "",
               count: 0,
               statusMessage: ({ event }) => {
-                const result = defaultCommandExecutor.execute(event.command);
+                const result = globalCommandRegistry.execute(event.command);
                 return result.message || `Executed: ${event.command}`;
               },
               commandInput: "",
@@ -146,7 +146,7 @@ export const vimModeMachine = createMachine({
             // Stay in COMMAND mode on error
             actions: assign({
               statusMessage: ({ event }) => {
-                const result = defaultCommandExecutor.execute(event.command);
+                const result = globalCommandRegistry.execute(event.command);
                 return result.error || `Failed to execute: ${event.command}`;
               },
               commandInput: "",

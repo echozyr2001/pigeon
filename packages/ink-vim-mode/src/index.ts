@@ -28,6 +28,12 @@ export { InputDispatcher } from "./dispatcher";
 
 // Command System
 export { VimCommandExecutor, defaultCommandExecutor } from "./commands";
+export {
+  CommandRegistry,
+  globalCommandRegistry,
+  useCommandRegistry,
+  type CommandHandler
+} from "./commands/registry";
 
 // TypeScript types
 export type {

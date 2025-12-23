@@ -127,6 +127,8 @@ export interface StatusLineProps {
     textColor?: string;
     borderStyle?: "single" | "double" | "round";
   };
+  // Callback for command execution - allows apps to handle commands like :q
+  onCommand?: (command: string, result: CommandResult) => void;
 }
 
 // Hook Return Types
